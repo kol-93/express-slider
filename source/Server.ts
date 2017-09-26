@@ -88,7 +88,7 @@ export interface IServerOptions {
 	mimes: string[];
 }
 
-class SlidesServer extends EventEmitter {
+export class SlidesServer extends EventEmitter {
 	private static _S_emitter: IInternalEmitter = new EventEmitter();
 	
 	static getDefaultOptions(): IServerOptions {
