@@ -1,10 +1,10 @@
 {
   "name": "express-slider",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Node.JS/TypeScript Express Slider Middleware",
   "main": "index.js",
   "scripts": {
-    "build": "tsc",
+    "install": "tsc",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
