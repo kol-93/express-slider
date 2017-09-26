@@ -1,0 +1,10 @@
+### JetBrains template
+.idea
+
+### NodeJS/NPM template
+package-lock.json
+npm-debug.log
+node_modules
+
+### Distribution
+distribution

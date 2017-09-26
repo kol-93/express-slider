@@ -1,0 +1,41 @@
+{
+  "name": "express-slider",
+  "version": "0.1.0",
+  "description": "Node.JS/TypeScript Express Slider Middleware",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "node",
+    "node.js",
+    "express",
+    "slider",
+    "middleware"
+  ],
+  "author": "kol1993@gmail.com",
+  "license": "GPL-3.0",
+  "dependencies": {
+    "express": "^4.15.4",
+    "gm": "^1.23.0",
+    "mmmagic": "^0.4.5",
+    "type-is": "^1.6.15",
+    "underscore": "^1.8.3"
+  },
+  "devDependencies": {
+    "@types/express": "^4.0.37",
+    "@types/gm": "^1.17.32",
+    "@types/mmmagic": "^0.4.29",
+    "@types/type-is": "^1.6.0",
+    "@types/underscore": "^1.8.3",
+    "tsc": "^1.20150623.0"
+  },
+  "engines": {
+    "node": ">=7.5.0"
+  },
+  "repository" : {
+    "type" : "git",
+    "url" : "https://github.com/kol-93/express-slider.git"
+  }
+}
