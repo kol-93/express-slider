@@ -1,8 +1,9 @@
 {
   "name": "express-slider",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Node.JS/TypeScript Express Slider Middleware",
-  "main": "index.js",
+  "main": "dist/Server.js",
+  "types": "dist/Server.d.ts",
   "scripts": {
     "install": "tsc",
     "test": "echo \"Error: no test specified\" && exit 1"
