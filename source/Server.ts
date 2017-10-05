@@ -432,12 +432,12 @@ export class SlidesServer extends EventEmitter {
 							return null;
 						}
 					});
-				let tmpSlidePath = path.join(targetDirectory, '_tmp.png');
-				let lastSlidePath = path.join(targetDirectory, '_last.png');
+				let tmpSlidePath = path.join(targetDirectory, '_tmp.jpg');
+				let lastSlidePath = path.join(targetDirectory, '_last.jpg');
 				for (let slide = 0; slide !== delay.length; ++slide) {
 					let targetDelay = delay[slide].toString(10);
 					let targetIndex = pad(slide, 10, '0', 4);
-					let targetFilePath = path.join(targetDirectory, `slide.${targetIndex}.${targetDelay}.png`);
+					let targetFilePath = path.join(targetDirectory, `slide.${targetIndex}.${targetDelay}.jpg`);
 					
 					if (slide === 0) {
 						let writeDeferred = new Deferred<Error, [string, string, string]>();
@@ -485,7 +485,7 @@ export class SlidesServer extends EventEmitter {
 				}
 			} else {
 				let writeDeferred = new Deferred<Error, [string, string, string]>();
-				let targetFilePath = path.join(targetDirectory, `slide.0000.0.png`);
+				let targetFilePath = path.join(targetDirectory, `slide.0000.0.jpg`);
 				graph.write(targetFilePath, writeDeferred.unsafe);
 				await writeDeferred.promise;
 				newFiles.push(targetFilePath);
