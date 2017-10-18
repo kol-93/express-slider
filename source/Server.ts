@@ -432,12 +432,12 @@ export class SlidesServer extends EventEmitter {
 							return null;
 						}
 					});
-				let tmpSlidePath = path.join(targetDirectory, '_tmp.jpg');
-				let lastSlidePath = path.join(targetDirectory, '_last.jpg');
+				let tmpSlidePath = path.join(targetDirectory, '_tmp.gif');
+				let lastSlidePath = path.join(targetDirectory, '_last.gif');
 				for (let slide = 0; slide !== delay.length; ++slide) {
 					let targetDelay = delay[slide].toString(10);
 					let targetIndex = pad(slide, 10, '0', 4);
-					let targetFilePath = path.join(targetDirectory, `slide.${targetIndex}.${targetDelay}.jpg`);
+					let targetFilePath = path.join(targetDirectory, `slide.${targetIndex}.${targetDelay}.gif`);
 					
 					if (slide === 0) {
 						let writeDeferred = new Deferred<Error, [string, string, string]>();
