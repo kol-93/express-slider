@@ -335,10 +335,6 @@ export class SlidesServer extends EventEmitter {
 		if (!_.isEqual(slides, this._controller.slides)) {
 			let running = this._controller.isRunning;
 			this._controller.slides = slides;
-			if (running) {
-				this._controller.stop();
-				this._controller.start();
-			}
 		}
 	}
 

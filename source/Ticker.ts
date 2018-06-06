@@ -32,6 +32,7 @@ export interface ITicker extends EventEmitter, ITickerOptions {
 	resume(this: ITicker): boolean;
 	pause(this: ITicker): boolean;
 	stop(this: ITicker): void;
+	reset(this: ITicker): void;
 
 	addListener(event: 'tick', callback: TickCallback): this;
 	addListener(event: 'start', callback: StartCallback): this;
@@ -131,7 +132,6 @@ export class Ticker extends EventEmitter implements ITicker {
 
 	start(this: Ticker) {
 		this.stop();
-		this._tick = 0;
 		this.resume();
 		this.emit('start');
 	}
@@ -156,13 +156,18 @@ export class Ticker extends EventEmitter implements ITicker {
 	}
 
 	stop(this: Ticker) {
+		this.reset();
 		if (this.pause()) {
 			this.emit('stop');
 		}
 	}
 
+	reset(this: Ticker) {
+		this._tick = 0;
+	}
+
 	private _processor(this: Ticker, expectedCall: number): void {
-		this._tick = this._ticks.length > 0 ? (this._tick % this._ticks.length) : 0;
+		this._tick = this._tick % Math.max(this._ticks.length, 1);
 		let tickItem: ITickItem = {};
 		let interval = this._interval;
 		if (this._ticks.length > 0) {

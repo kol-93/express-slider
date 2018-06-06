@@ -103,9 +103,7 @@ export class SliderController extends EventEmitter implements ISliderController 
 		if (value instanceof Array && _.all(value, isSlide)) {
 			if (!_.isEqual(this._ticker.ticks, value)) {
 				let running = this._ticker.isRunning;
-				if (running) {
-					this._ticker.stop();
-				}
+				this._ticker.stop();
 				this._ticker.ticks = value;
 				this._model.slides = value;
 				this._model.current = 0;
