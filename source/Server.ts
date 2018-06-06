@@ -1,4 +1,4 @@
-import {EventEmitter} from "events";
+import { EventEmitter } from "events";
 import * as express from "express";
 import * as fs from "fs";
 import * as path from "path";
@@ -8,11 +8,11 @@ import * as _ from "underscore";
 import * as url from "url";
 import * as gm from "gm";
 
-import {ISliderController, SliderController} from "./SliderModel";
-import {getImageMime, loadSlides, pad} from "./utilities";
-import {Deferred} from "./Deferred";
-import {ISlide} from "./Slide";
-import {Dictionary} from "underscore";
+import { ISliderController, SliderController } from "./SliderController";
+import { getImageMime, loadSlides, pad } from "./utilities";
+import { Deferred } from "./Deferred";
+import { ISlide } from "./Slide";
+import { Dictionary } from "underscore";
 
 interface IFrameGeometry {
 	width: number;
@@ -66,17 +66,17 @@ const redirectTemplate = _.template(
 
 interface IInternalEmitter extends EventEmitter {
 	addListener(event: 'slides', callback: InternalSlidesCallback): this;
-	
+
 	emit(event: 'slides', directoryPath: string, cookie: number): boolean;
-	
+
 	on(event: 'slides', callback: InternalSlidesCallback): this;
-	
+
 	once(event: 'slides', callback: InternalSlidesCallback): this;
-	
+
 	prependListener(event: 'slides', callback: InternalSlidesCallback): this;
-	
+
 	prependOnceListener(event: 'slides', callback: InternalSlidesCallback): this;
-	
+
 	removeListener(event: 'slides', callback: InternalSlidesCallback): this;
 }
 
@@ -90,7 +90,7 @@ export interface IServerOptions {
 
 export class SlidesServer extends EventEmitter {
 	private static _S_emitter: IInternalEmitter = new EventEmitter();
-	
+
 	static getDefaultOptions(): IServerOptions {
 		return {
 			prefix: '/',
@@ -100,16 +100,16 @@ export class SlidesServer extends EventEmitter {
 			mimes: getImageMime()
 		};
 	}
-	
+
 	private _express: express.Express;
 	private _target: string;
 	private _sources: string[];
 	private _prefix: string;
 	private _currentSource?: string;
 	private _cookie: number;
-	private _model: ISliderController;
+	private _controller: ISliderController;
 	private _mimes: string[];
-	
+
 	constructor(options?: Partial<IServerOptions>) {
 		super();
 		let _options: IServerOptions = SlidesServer.getDefaultOptions();
@@ -132,7 +132,7 @@ export class SlidesServer extends EventEmitter {
 				}
 			}
 			if (typeof options.sources !== 'undefined') {
-				if (!(options.sources instanceof  Array && _.all(options.sources, (value) => typeof value === 'string'))) {
+				if (!(options.sources instanceof Array && _.all(options.sources, (value) => typeof value === 'string'))) {
 					throw new TypeError('Instance of string[] expected as options.sources');
 				} else {
 					_options.sources = options.sources;
@@ -146,7 +146,7 @@ export class SlidesServer extends EventEmitter {
 				}
 			}
 			if (typeof options.mimes !== 'undefined') {
-				if (!(options.mimes instanceof  Array && _.all(options.mimes, (value) => typeof value === 'string'))) {
+				if (!(options.mimes instanceof Array && _.all(options.mimes, (value) => typeof value === 'string'))) {
 					throw new TypeError('Instance of string[] expected as options.mimes');
 				} else {
 					_options.mimes = options.mimes;
@@ -163,46 +163,46 @@ export class SlidesServer extends EventEmitter {
 		app.get(path.posix.join(prefix, 'slides', ':id'), this.serveSlide.bind(this));
 		app.put(path.posix.join(prefix, 'slides'), this.putSlides.bind(this));
 		app.options(path.posix.join(prefix, 'slides'), this.optionsSlides.bind(this));
-		
-		this._model = new SliderController();
-		this._model.interval = _options.interval;
+
+		this._controller = new SliderController();
+		this._controller.interval = _options.interval;
 		this._cookie = Date.now();
-		
+
 		SlidesServer._S_emitter.on('slides', this._onNewSlides.bind(this));
 	}
-	
+
 	get express(): express.Express {
 		return this._express;
 	}
-	
+
 	get prefix(): string {
 		return this._prefix;
 	}
-	
+
 	get source(): string | void {
 		return this._currentSource;
 	}
-	
+
 	get sources(): string[] {
 		return this._sources;
 	}
-	
-	get model(): ISliderController {
-		return this._model;
+
+	get controller(): ISliderController {
+		return this._controller;
 	}
-	
+
 	get target(): string {
 		return this._target;
 	}
-	
+
 	get cookie(): number {
 		return this._cookie;
 	}
-	
+
 	get mimes(): string[] {
 		return this._mimes;
 	}
-	
+
 	_onNewSlides(this: SlidesServer, directoryPath: string, cookie: number) {
 		if (this._cookie !== cookie) { // skipping current server
 			let directoryIndex = this._sources.indexOf(directoryPath);
@@ -216,15 +216,15 @@ export class SlidesServer extends EventEmitter {
 			}
 		}
 	}
-	
+
 	async optionsSlides(this: SlidesServer, request: express.Request, response: express.Response) {
 		response.setHeader('Accept', this._mimes.join(', '));
 		response.setHeader('Access-Control-Allow-Methods', ['PUT', 'OPTIONS'].join(', '));
 		response.sendStatus(200);
 	}
-	
+
 	async putSlides(this: SlidesServer, request: express.Request, response: express.Response) {
-		let contentType = request.headers['content-type'];
+		let contentType: any = request.headers['content-type'];
 		if (
 			!_.all(
 				((contentType instanceof Array) ? contentType : [contentType]),
@@ -281,7 +281,7 @@ export class SlidesServer extends EventEmitter {
 			}
 		}
 	}
-	
+
 	async serveSlide(this: SlidesServer, request: express.Request, response: express.Response) {
 		let _id: string = request.params.id;
 		let _modified: string | void = request.params.modified;
@@ -298,7 +298,7 @@ export class SlidesServer extends EventEmitter {
 			return;
 		}
 		let parsedUrl = url.parse(request.url);
-		let slides = this._model.slides;
+		let slides = this._controller.slides;
 		if (0 <= id && id < slides.length) {
 			let slide = slides[id];
 			if (slide.reference !== parsedUrl.pathname) {
@@ -323,7 +323,7 @@ export class SlidesServer extends EventEmitter {
 			response.sendStatus(404);
 		}
 	}
-	
+
 	async refresh(this: SlidesServer) {
 		let slides: ISlide[] = [];
 		try {
@@ -332,16 +332,16 @@ export class SlidesServer extends EventEmitter {
 			console.warn(`SliderApp.refresh(): ${error.stack}`);
 			slides = [];
 		}
-		if (!_.isEqual(slides, this._model.slides)) {
-			let running = this._model.isRunning;
-			this._model.slides = slides;
+		if (!_.isEqual(slides, this._controller.slides)) {
+			let running = this._controller.isRunning;
+			this._controller.slides = slides;
 			if (running) {
-				this._model.stop();
-				this._model.start();
+				this._controller.stop();
+				this._controller.start();
 			}
 		}
 	}
-	
+
 	async save(this: SlidesServer, sourcePath: string) {
 		let existsDeferred = new Deferred<NodeJS.ErrnoException, [boolean]>();
 		fs.exists(sourcePath, existsDeferred.safe);
@@ -352,9 +352,9 @@ export class SlidesServer extends EventEmitter {
 		await this._save(sourcePath);
 		SlidesServer._S_emitter.emit('slides', this.target, this.cookie);
 	}
-	
-	async _load(this: SlidesServer) {
-		let slides = [];
+
+	async _load(this: SlidesServer): Promise<ISlide[]> {
+		let slides: ISlide[] = [];
 		for (let source of this.sources) {
 			try {
 				slides = await loadSlides(this.prefix, source, this._mimes);
@@ -369,7 +369,7 @@ export class SlidesServer extends EventEmitter {
 		this._currentSource = undefined;
 		return [];
 	}
-	
+
 	async _save(this: SlidesServer, sourcePath: string) {
 		let targetDirectory = this.target;
 		try {
@@ -409,12 +409,12 @@ export class SlidesServer extends EventEmitter {
 				let delay: number[] = _delay
 					.map((value: any): number => {
 						switch (typeof value) {
-						case 'string':
-							return parseInt(value, 10);
-						case 'number':
-							return value;
-						default:
-							return 0;
+							case 'string':
+								return parseInt(value, 10);
+							case 'number':
+								return value;
+							default:
+								return 0;
 						}
 					})
 					.map((value) => value * 10);
@@ -438,14 +438,14 @@ export class SlidesServer extends EventEmitter {
 					let targetDelay = delay[slide].toString(10);
 					let targetIndex = pad(slide, 10, '0', 4);
 					let targetFilePath = path.join(targetDirectory, `slide.${targetIndex}.${targetDelay}.gif`);
-					
+
 					if (slide === 0) {
 						let writeDeferred = new Deferred<Error, [string, string, string]>();
 						gm(size.width, size.height, background[0])
 							.write(lastSlidePath = targetFilePath, writeDeferred.unsafe);
 						await writeDeferred.promise;
 					}
-					
+
 					{
 						let tmpDeferred = new Deferred<Error, [string, string, string]>();
 						(graph as any).selectFrame(slide); // @todo State.selectFrame(slide: number)
@@ -453,7 +453,7 @@ export class SlidesServer extends EventEmitter {
 						graph.write(tmpSlidePath, tmpDeferred.unsafe);
 						await tmpDeferred.promise;
 					}
-					
+
 					{
 						let slideGeometry = geometry[slide];
 						if (slideGeometry === null) {
@@ -472,7 +472,7 @@ export class SlidesServer extends EventEmitter {
 						local_image.write(lastSlidePath = targetFilePath, writeDeferred.unsafe);
 						await writeDeferred.promise;
 					}
-					
+
 					try {
 						let unlinkDeferred = new Deferred<NodeJS.ErrnoException, [void]>();
 						fs.unlink(tmpSlidePath, unlinkDeferred.unsafe);
@@ -480,7 +480,7 @@ export class SlidesServer extends EventEmitter {
 					} catch (error) {
 						// ignore
 					}
-					
+
 					newFiles.push(targetFilePath);
 				}
 			} else {

@@ -18,12 +18,9 @@ export {
 	ChangedCallback,
 	StartCallback,
 	StopCallback
-} from "./SliderModel";
+} from "./SliderController";
 
 export {
 	IServerOptions,
 	SlidesServer
 } from "./Server";
-
-
-
