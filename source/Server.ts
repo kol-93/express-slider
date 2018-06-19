@@ -224,6 +224,10 @@ export class SlidesServer extends EventEmitter {
 	}
 
 	async putSlides(this: SlidesServer, request: express.Request, response: express.Response) {
+		//set unlimited timeout
+		//to prevent empty reply from server due to long-time processing
+		response.setTimeout(0);
+
 		let contentType: any = request.headers['content-type'];
 		if (
 			!_.all(
