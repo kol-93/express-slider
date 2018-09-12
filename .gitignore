@@ -1,5 +1,6 @@
 ### JetBrains template
 .idea
+.vscode
 
 ### NodeJS/NPM template
 package-lock.json
@@ -8,3 +9,4 @@ node_modules
 
 ### Distribution
 distribution
+images
