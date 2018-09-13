@@ -1,7 +1,7 @@
 import * as crypto from "crypto";
 import { IncomingHttpHeaders } from "http2";
 import { EventEmitter } from "events";
-import { ChildProcess } from "child_process";
+import { ChildProcess, fork } from "child_process";
 import { promisify } from "util";
 import * as express from "express";
 import * as fs from "fs";
@@ -17,6 +17,7 @@ import { getImageMime, loadSlides, pad } from "./utilities";
 import { Deferred } from "./Deferred";
 import { ISlide } from "./Slide";
 import { Dictionary } from "underscore";
+import { Queue } from "./queue/task.queue";
 
 interface IFrameGeometry {
 	width: number;
@@ -95,6 +96,7 @@ export interface IServerOptions {
 
 export class SlidesServer extends EventEmitter {
 	private static _S_emitter: IInternalEmitter = new EventEmitter();
+	private static _parseQueue = new Queue(-1, 1); //queue size unlimited (by -1), max count of concurrent tasks = 1 (by 1)
 
 	static getDefaultOptions(): IServerOptions {
 		return {
@@ -115,13 +117,10 @@ export class SlidesServer extends EventEmitter {
 	private _cookie: number;
 	private _controller: ISliderController;
 	private _mimes: string[];
-	private _maxRunningProcessors: number;
-	private _parseQueue: Map<string, ChildProcess>;
+	private _lastPromotionDir: string;
 
 	constructor(options?: Partial<IServerOptions>) {
 		super();
-		this._maxRunningProcessors = 5;
-		this._parseQueue = new Map();
 		let _options: IServerOptions = SlidesServer.getDefaultOptions();
 		if (typeof options !== 'undefined') {
 			if (typeof options !== 'object') {
@@ -176,7 +175,8 @@ export class SlidesServer extends EventEmitter {
 		this._sources = _options.sources;
 		this._currentSource = undefined;
 		this._mimes = _options.mimes;
-		this._createDir(_options.lastPromotionDir, 0o644);
+		this._lastPromotionDir = _options.lastPromotionDir;
+		this._createDir(this.lastPromotionDir, 0o644);
 		this._express.get(path.posix.join(prefix, 'slides', ':id', ':modified'), this.serveSlide.bind(this));
 		this._express.get(path.posix.join(prefix, 'slides', ':id'), this.serveSlide.bind(this));
 		this._express.put(path.posix.join(prefix, 'slides'), this.PutSlides.bind(this));
@@ -221,6 +221,10 @@ export class SlidesServer extends EventEmitter {
 		return this._mimes;
 	}
 
+	get lastPromotionDir(): string {
+		return this._lastPromotionDir;
+	}
+
 	_onNewSlides(this: SlidesServer, directoryPath: string, cookie: number) {
 		if (this._cookie !== cookie) { // skipping current server
 			let directoryIndex = this._sources.indexOf(directoryPath);
@@ -242,6 +246,7 @@ export class SlidesServer extends EventEmitter {
 	}
 
 	private async _createDir(dirPath: string, mode?: string | number | null | undefined): Promise<void> {
+		console.time(`createdir`);
 		console.log(`[SLIDES][${this.prefix}] Start to create dir:`, dirPath, `mode:`, mode);
 		try {
 			await promisify(fs.access)(dirPath, fs.constants.R_OK | fs.constants.W_OK);
@@ -256,10 +261,13 @@ export class SlidesServer extends EventEmitter {
 		} catch (error) {
 			console.error(`[SLIDES][${this.prefix}][ERROR] Create dir`, error.message);
 		}
+		console.timeEnd(`createdir`);
 	}
 
 	private _checkContentType(headers: IncomingHttpHeaders): boolean {
+		console.time(`checkcontent`);
 		let contentType: any = headers['content-type'];
+		console.log(`[SLIDES][${this.prefix}] Check content type`, contentType);
 		if (
 			!_.all(
 				((contentType instanceof Array) ? contentType : [contentType]),
@@ -268,15 +276,22 @@ export class SlidesServer extends EventEmitter {
 		) {
 			return false;
 		}
+		console.timeEnd(`checkcontent`);
 		return true;
 	}
 
 	private async _makeTmpDir(prefix: string): Promise<string> {
+		console.time(`makeTmpDir`);
+		console.log(`[SLIDES][${this.prefix}] Make temporary dir, prefix:`, prefix);
 		const tmpPath = path.join(os.tmpdir(), prefix);
-		return promisify(fs.mkdtemp)(tmpPath, 'utf8');
+		const result = promisify(fs.mkdtemp)(tmpPath, 'utf8');
+		console.timeEnd(`makeTmpDir`);
+		return result;
 	}
 
 	private async _rmDirRecursively(dir: string): Promise<void> {
+		console.time(`rmDirRecursive`);
+		console.log(`[SLIDES][${this.prefix}] Remove dir recursively`, dir);
 		if (await promisify(fs.exists)(dir)) {
 			const content = (await promisify(fs.readdir)(dir)).map(async file => {
 				const curPath = path.join(dir, file);
@@ -289,9 +304,12 @@ export class SlidesServer extends EventEmitter {
 			await Promise.all(content);
 			await promisify(fs.rmdir)(dir);
 		}
+		console.timeEnd(`rmDirRecursive`);
 	}
 
 	private _writeTargetFile(filePath: string, request: express.Request): Promise<void> {
+		console.time(`writeTargetFile`);
+		console.log(`[SLIDES][${this.prefix}] Write target file`, filePath);
 		const targetStream = fs.createWriteStream(filePath, { autoClose: true });
 		request.pipe(targetStream);
 		const writeResult = new Promise<void>((resolve, reject) => {
@@ -299,10 +317,13 @@ export class SlidesServer extends EventEmitter {
 			targetStream.on('error', reject);
 			targetStream.on('close', resolve);
 		});
+		console.timeEnd(`writeTargetFile`);
 		return writeResult;
 	}
 
 	private async _compareFiles(oldFilePath: string, newFilePath: string): Promise<boolean> {
+		console.time(`compareFiles`);
+		console.log(`[SLIDES][${this.prefix}] Compare files`, oldFilePath, newFilePath);
 		let result = false;
 		try {
 			//check if exists and can read
@@ -315,16 +336,46 @@ export class SlidesServer extends EventEmitter {
 			result = _.isEqual(oldHash, newHash);
 			console.log(`Hash:`, 'oldHash', oldHash, 'new hash', newHash, 'are equal:', result);
 		} catch (error) {
-			console.error(`[SLIDES][ERROR] ${this.prefix} compare files`, error);
+			console.error(`[SLIDES][ERROR] '${this.prefix}' compare files`, error.message);
 			result = false;
 		}
+		console.timeEnd(`compareFiles`);
 		return result;
+	}
+
+	private _parse(parserProcess: ChildProcess): Promise<any> {
+		console.time(`parse`);
+		console.log(`[SLIDES] '${this.prefix}' Fork parse process`);
+		return new Promise((resolve, reject) => {
+			parserProcess.send('start');
+			//here we are waiting for message from SlideParser.ts when operation will be finished
+			parserProcess.on('message', async (data) => {
+				console.log(`[SLIDES] '${this.prefix}' Slides parsing is finished. Data: `, JSON.stringify(data));
+				resolve(data);
+				console.timeEnd(`parse`);
+				parserProcess.kill();
+			});
+			parserProcess.on('error', (error: Error) => {
+				console.log(`FORK ERROR`);
+				reject(error);
+				parserProcess.kill();
+			});
+			parserProcess.on('close', (code: number, signal: string) => {
+				console.log(`FORK CLOSE`);
+				if (code !== 0) {
+					reject(code);
+				}
+				resolve();
+			});
+		})
 	}
 
 	async PutSlides(this: SlidesServer, request: express.Request, response: express.Response) {
 		//set unlimited timeout
 		//to prevent empty reply from server due to long-time processing
 		response.setTimeout(0);
+
+		const now = Date.now();
 
 		console.log(`[SLIDES][PUT] '${this.prefix}' Start saving slides.`);
 
@@ -333,31 +384,55 @@ export class SlidesServer extends EventEmitter {
 		if (!isMedia) {
 			console.log(`[SLIDES][PUT] '${this.prefix}' Response code 406. Not a media. Stop parse file.`);
 			response.sendStatus(406);
+			return;
 		}
 
 		//make temp dir for incoming gif file
 		const tmpSlidesPath = await this._makeTmpDir('slides-vik-');
-		console.log(`[SLIDES][PUT] '${this.prefix}' tmpSlidesPath`, tmpSlidesPath);
-		// let targetFilePath: string | undefined;
 
 		try {
 			//write gif file to tmp dir (stream)
-			const targetName = 'target';
+			const targetName = 'target-' + this.prefix.replace(new RegExp('\\/', 'gi'), '');
 			const targetFilePath = path.join(tmpSlidesPath, targetName);
-			console.log(`[SLIDES][PUT] '${this.prefix}' targetFilePath`, tmpSlidesPath);
 			await this._writeTargetFile(targetFilePath, request);
 
 			//find md5 hash of loaded file
 			//find sha hash of loaded file
 			//check if such file already exists in folder project (last loaded promotions) - check both hashes
-			const lastPromoFile = path.join(SlidesServer.getDefaultOptions().lastPromotionDir, targetName);
-			const isFilesEqual = await this._compareFiles(lastPromoFile, targetFilePath);
+			const lastPromoFilePath = path.join(this.lastPromotionDir, targetName);
+			const isFilesEqual = await this._compareFiles(lastPromoFilePath, targetFilePath);
+			if (isFilesEqual) {
+				//-- if such file already exists - ignore processing - response 304
+				console.log(`[SLIDES][PUT] '${this.prefix}' new promo is equal with old one. Ignore next processing!`);
+				response.sendStatus(304);
+				return;
+			}
+			console.log(`[SLIDES][PUT] '${this.prefix}' new promo GIF start processing.`);
+
+			//check if previous forked child processes exist and they count less then 'this._maxRunningProcessors'
+			//if child process more or equal - kill the last added process
+			const parse = async (imageFileName: string, parseDirectory: string) => {
+				const parser = fork(path.join(__dirname, 'SlideParser.js'));
+				return this._parse(parser);
+			};
+			const res = await SlidesServer._parseQueue.enqueue(parse, this, [targetFilePath, tmpSlidesPath]);
+			console.log(`[SLIDES][PUT] '${this.prefix}' result:`, res);
+
+			//fork new child process and register it to queue
+			// SlidesServer._parseQueue.set(now, parsePromise);
+			console.log(`[SLIDES][PUT] '${this.prefix}' await this.refresh().`);
+			await this.refresh();
 
 
 
 
+
+
+			response.sendStatus(200);
 		} catch (error) {
 			console.log(`[SLIDES][PUT][ERROR] '${this.prefix}'`, error);
+			response.sendStatus(500);
+		} finally {
 			await this._rmDirRecursively(tmpSlidesPath);
 		}
 
@@ -365,10 +440,6 @@ export class SlidesServer extends EventEmitter {
 
 
 
-		//-- if such file already exists - ignore processing - response 304
-		//check if previous forked child processes exist and they count less then 'this._maxRunningProcessors'
-		//if child process more or equal - kill the most older process
-		//fork new child process and register it to queue
 		//copy file to storage of last loaded file '/var/lib/rik....'
 		//create temporary directory for saving new slides '/tmp/.....'
 		//parse this file to separated images and save to tmp directory created before
@@ -381,6 +452,11 @@ export class SlidesServer extends EventEmitter {
 		//if error send response 500
 
 	}
+
+
+
+
+
 
 
 	async putSlides(this: SlidesServer, request: express.Request, response: express.Response) {
@@ -696,6 +772,7 @@ if (require.main === module) {
 	const secondary = path.join(root, 'images', 'secondary');
 	const main = path.join(root, 'images', 'main');
 	const fallback = path.join(root, 'images', 'fallback');
+	const lastPromo = path.join(root, 'lastpromo');
 
 	let secapp = new SlidesServer({
 		prefix: '/secondary',
@@ -704,10 +781,11 @@ if (require.main === module) {
 			secondary,
 			main,
 			fallback,
-		]
+		],
+		lastPromotionDir: lastPromo
 	});
 	secapp.controller.on('changed', (value) => {
-		console.info('[SECONDARY][CHANGED]', JSON.stringify(value).slice(0, 100));
+		// console.info('[SECONDARY][CHANGED]', JSON.stringify(value).slice(0, 100));
 		if (!secapp.controller.isRunning) {
 			secapp.controller.start();
 		}
@@ -721,11 +799,12 @@ if (require.main === module) {
 		sources: [
 			main,
 			fallback,
-		]
+		],
+		lastPromotionDir: lastPromo
 	});
 
 	mainapp.controller.on('changed', (value) => {
-		console.info('[MAIN][CHANGED]', JSON.stringify(value).slice(0, 100));
+		// console.info('[MAIN][CHANGED]', JSON.stringify(value).slice(0, 100));
 		if (!mainapp.controller.isRunning) {
 			mainapp.controller.start();
 		}
