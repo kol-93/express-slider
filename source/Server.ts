@@ -39,11 +39,12 @@ export class SlidesServer extends EventEmitter {
 		};
 	}
 
+	private _currentSource?: string;
+
 	readonly express: express.Express;
 	readonly target: string;
 	readonly sources: string[];
 	readonly prefix: string;
-	private _currentSource?: string;
 	readonly cookie: number;
 	readonly controller: ISliderController;
 	readonly mimes: string[];
@@ -120,11 +121,10 @@ export class SlidesServer extends EventEmitter {
 				parserProcess.send('start');
 				return parser;
 			};
-			//set gif parse task to queue 
+
+			//fork new child process and register it to queue
 			const res = await SlidesServer._parseQueue.enqueue(parse, null, [request]);
 
-			// emit event about new slides
-			SlidesServer._S_emitter.emit('slides', this.target, this.cookie);
 
 			console.log(`[SLIDES][PUT] '${this.prefix}' result:`, res);
 			if (typeof res === 'number') {
@@ -133,7 +133,9 @@ export class SlidesServer extends EventEmitter {
 				return;
 			}
 
-			//fork new child process and register it to queue
+			// emit event about new slides
+			SlidesServer._S_emitter.emit('slides', this.target, this.cookie);
+
 			console.log(`[SLIDES][PUT] '${this.prefix}' await this.refresh().`);
 			await this.refresh();
 

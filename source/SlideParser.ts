@@ -2,49 +2,9 @@ import * as gm from "gm";
 import * as fs from 'fs';
 import * as path from 'path';
 import { Deferred } from './Deferred';
-import { Dictionary } from "underscore";
 import { pad } from "./utilities";
-import { promisify } from "util";
-
-interface IFrameGeometry {
-    width: number;
-    height: number;
-    left: number;
-    top: number;
-}
-
-interface IAnimationInfo {
-    Format: string[];
-    format: string;
-    Geometry: string[];
-    size: gm.Dimensions;
-    Class: string[];
-    Type: string[];
-    Depth: string[];
-    depth: number;
-    'Channel Depths': gm.ChannelInfo<string>;
-    'Channel Statistics': gm.ChannelInfo<gm.ColorStatistics>;
-    Colors: Dictionary<string>;
-    color: number;
-    Filesize: string[];
-    Interlace: string[];
-    Orientation: string;
-    'Background Color': string[];
-    'Border Color': string[];
-    'Matte Color': string[];
-    'Page geometry': string[];
-    Compose: string[];
-    Dispose: string[];
-    Delay: string[];
-    Scene: string[];
-    Compression: string[];
-    Signature: string[];
-    Tainted: string[];
-    'User Time': string[];
-    'Elapsed Time': string[];
-    'Pixels Per Second': string[];
-    path: string;
-}
+import { IAnimationInfo } from "./interfaces/IAnimationInfo";
+import { IFrameGeometry } from "./interfaces/IFrameGeometry";
 
 
 function isAnimationInfo(info: gm.ImageInfo | IAnimationInfo): info is IAnimationInfo {
@@ -202,22 +162,12 @@ class SlideParser {
 
 }
 
-
-const longComputation = () => {
-    let sum = 0;
-    for (let i = 0; i < 1e10; i++) {
-        sum += i;
-    };
-    return sum;
-};
-
 const argv = process.argv.slice(2);
 const source = argv[0];
 const target = argv[1];
 
 process.on('message', async (msg) => {
     console.log(`[SLIDE-PARSER] Process received message: ${msg}.`);
-    // const sum = longComputation();
     console.log(`source`, source, `target`, target);
     const parser = new SlideParser();
     await parser.save(source, target);
