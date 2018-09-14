@@ -21,6 +21,9 @@ export {
 } from "./SliderController";
 
 export {
-	IServerOptions,
 	SlidesServer
 } from "./Server";
+
+export {
+	ISlideServerOptions
+} from "./interfaces/ISlideServerOptions";

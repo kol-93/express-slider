@@ -10,95 +10,25 @@ import * as MimeIs from "type-is";
 import * as os from "os";
 import * as _ from "underscore";
 import * as url from "url";
-import * as gm from "gm";
 
 import { ISliderController, SliderController } from "./SliderController";
-import { getImageMime, loadSlides, pad } from "./utilities";
+import { getImageMime, loadSlides } from "./utilities";
 import { Deferred } from "./Deferred";
 import { ISlide } from "./Slide";
-import { Dictionary } from "underscore";
 import { Queue } from "./queue/task.queue";
+import { IInternalEmitter } from "./interfaces/IInternalEmitter";
+import { ISlideServerOptions } from "./interfaces/ISlideServerOptions";
 
-interface IFrameGeometry {
-	width: number;
-	height: number;
-	left: number;
-	top: number;
-}
-
-interface IAnimationInfo {
-	Format: string[];
-	format: string;
-	Geometry: string[];
-	size: gm.Dimensions;
-	Class: string[];
-	Type: string[];
-	Depth: string[];
-	depth: number;
-	'Channel Depths': gm.ChannelInfo<string>;
-	'Channel Statistics': gm.ChannelInfo<gm.ColorStatistics>;
-	Colors: Dictionary<string>;
-	color: number;
-	Filesize: string[];
-	Interlace: string[];
-	Orientation: string;
-	'Background Color': string[];
-	'Border Color': string[];
-	'Matte Color': string[];
-	'Page geometry': string[];
-	Compose: string[];
-	Dispose: string[];
-	Delay: string[];
-	Scene: string[];
-	Compression: string[];
-	Signature: string[];
-	Tainted: string[];
-	'User Time': string[];
-	'Elapsed Time': string[];
-	'Pixels Per Second': string[];
-	path: string;
-}
-
-function isAnimationInfo(info: gm.ImageInfo | IAnimationInfo): info is IAnimationInfo {
-	return 'Delay' in info;
-}
-
-type InternalSlidesCallback = (directoryPath: string, cookie: number) => void;
 
 const redirectTemplate = _.template(
 	'<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Redirecting to <%= location.title %></title></head><body><pre>Redirecting to <a href="<%= location.url %>"><%= location.title %></a></pre></body>'
 );
 
-interface IInternalEmitter extends EventEmitter {
-	addListener(event: 'slides', callback: InternalSlidesCallback): this;
-
-	emit(event: 'slides', directoryPath: string, cookie: number): boolean;
-
-	on(event: 'slides', callback: InternalSlidesCallback): this;
-
-	once(event: 'slides', callback: InternalSlidesCallback): this;
-
-	prependListener(event: 'slides', callback: InternalSlidesCallback): this;
-
-	prependOnceListener(event: 'slides', callback: InternalSlidesCallback): this;
-
-	removeListener(event: 'slides', callback: InternalSlidesCallback): this;
-}
-
-export interface IServerOptions {
-	prefix: string;
-	target: string;
-	sources: string[];
-	interval: number;
-	mimes: string[];
-	lastPromotionDir: string; //dir where saved last loaded '*.gif' file with promotions 
-}
-
 export class SlidesServer extends EventEmitter {
 	private static _S_emitter: IInternalEmitter = new EventEmitter();
 	private static _parseQueue = new Queue(-1, 1); //queue size unlimited (by -1), max count of concurrent tasks = 1 (by 1)
 
-	static getDefaultOptions(): IServerOptions {
+	static getDefaultOptions(): ISlideServerOptions {
 		return {
 			prefix: '/',
 			target: '',
@@ -109,140 +39,284 @@ export class SlidesServer extends EventEmitter {
 		};
 	}
 
-	private _express: express.Express;
-	private _target: string;
-	private _sources: string[];
-	private _prefix: string;
+	readonly express: express.Express;
+	readonly target: string;
+	readonly sources: string[];
+	readonly prefix: string;
 	private _currentSource?: string;
-	private _cookie: number;
-	private _controller: ISliderController;
-	private _mimes: string[];
-	private _lastPromotionDir: string;
+	readonly cookie: number;
+	readonly controller: ISliderController;
+	readonly mimes: string[];
+	readonly lastPromotionDir: string;
 
-	constructor(options?: Partial<IServerOptions>) {
+	constructor(options?: Partial<ISlideServerOptions>) {
 		super();
-		let _options: IServerOptions = SlidesServer.getDefaultOptions();
-		if (typeof options !== 'undefined') {
-			if (typeof options !== 'object') {
-				throw new TypeError('Instance of object expected as options');
-			}
-			if (typeof options.prefix !== 'undefined') {
-				if (typeof options.prefix !== 'string') {
-					throw new TypeError('Instance of string expected as options.prefix');
-				} else {
-					_options.prefix = options.prefix;
-				}
-			}
-			if (typeof options.target !== 'undefined') {
-				if (typeof options.target !== 'string') {
-					throw new TypeError('Instance of string expected as options.target');
-				} else {
-					_options.target = options.target;
-				}
-			}
-			if (typeof options.sources !== 'undefined') {
-				if (!(options.sources instanceof Array && _.all(options.sources, (value) => typeof value === 'string'))) {
-					throw new TypeError('Instance of string[] expected as options.sources');
-				} else {
-					_options.sources = options.sources;
-				}
-			}
-			if (typeof options.interval !== 'undefined') {
-				if (!(typeof options.interval === 'number' && options.interval > 0)) {
-					throw new TypeError('Instance of positive number expected as options.interval');
-				} else {
-					_options.interval = options.interval;
-				}
-			}
-			if (typeof options.mimes !== 'undefined') {
-				if (!(options.mimes instanceof Array && _.all(options.mimes, (value) => typeof value === 'string'))) {
-					throw new TypeError('Instance of string[] expected as options.mimes');
-				} else {
-					_options.mimes = options.mimes;
-				}
-			}
-			if (typeof options.lastPromotionDir !== 'undefined') {
-				if (typeof options.lastPromotionDir !== 'string') {
-					throw new TypeError('Instance of string expected as options.lastPromotionDir');
-				} else {
-					_options.lastPromotionDir = options.lastPromotionDir;
-				}
-			}
-		}
-		let prefix = this._prefix = _options.prefix;
-		this._express = express();
-		this._target = _options.target;
-		this._sources = _options.sources;
+		let _options: ISlideServerOptions = SlidesServer.getDefaultOptions();
+		this._validateOptions(options, _options);
+		let prefix = this.prefix = _options.prefix;
+		this.express = express();
+		this.target = _options.target;
+		this.sources = _options.sources;
 		this._currentSource = undefined;
-		this._mimes = _options.mimes;
-		this._lastPromotionDir = _options.lastPromotionDir;
+		this.mimes = _options.mimes;
+		this.lastPromotionDir = _options.lastPromotionDir;
 		this._createDir(this.lastPromotionDir, 0o644);
-		this._express.get(path.posix.join(prefix, 'slides', ':id', ':modified'), this.serveSlide.bind(this));
-		this._express.get(path.posix.join(prefix, 'slides', ':id'), this.serveSlide.bind(this));
-		this._express.put(path.posix.join(prefix, 'slides'), this.PutSlides.bind(this));
-		this._express.options(path.posix.join(prefix, 'slides'), this.optionsSlides.bind(this));
+		this.express.get(path.posix.join(prefix, 'slides', ':id', ':modified'), this.serveSlide.bind(this));
+		this.express.get(path.posix.join(prefix, 'slides', ':id'), this.serveSlide.bind(this));
+		this.express.put(path.posix.join(prefix, 'slides'), this.PutSlides.bind(this));
+		this.express.options(path.posix.join(prefix, 'slides'), this.optionsSlides.bind(this));
 
-		this._controller = new SliderController();
-		this._controller.interval = _options.interval;
-		this._cookie = Date.now();
+		this.controller = new SliderController();
+		this.controller.interval = _options.interval;
+		this.cookie = Date.now();
 
 		SlidesServer._S_emitter.on('slides', this._onNewSlides.bind(this));
 	}
 
-	get express(): express.Express {
-		return this._express;
+	async optionsSlides(this: SlidesServer, request: express.Request, response: express.Response) {
+		response.setHeader('Accept', this.mimes.join(', '));
+		response.setHeader('Access-Control-Allow-Methods', ['PUT', 'OPTIONS'].join(', '));
+		response.sendStatus(200);
 	}
 
-	get prefix(): string {
-		return this._prefix;
+	async PutSlides(this: SlidesServer, request: express.Request, response: express.Response) {
+		//set unlimited timeout
+		//to prevent empty reply from server due to long-time processing
+		response.setTimeout(0);
+
+		console.log(`[SLIDES][PUT] '${this.prefix}' Start saving slides.`);
+
+		//check if content type is 'image/gif'
+		const isMedia = this._checkContentType(request.headers);
+		if (!isMedia) {
+			console.log(`[SLIDES][PUT] '${this.prefix}' Response code 406. Not a media. Stop parse file.`);
+			response.sendStatus(406);
+			return;
+		}
+
+		//make temp dir for incoming gif file
+		const tmpSlidesPath = await this._makeTmpDir('slides-vik-');
+
+		try {
+			const parse = async (request: express.Request) => {
+				//write gif file to tmp dir (stream)
+				const targetName = 'target-' + this.prefix.replace(new RegExp('\\/', 'gi'), '');
+				const targetFilePath = path.join(tmpSlidesPath, targetName);
+
+				await this._writeTargetFile(targetFilePath, request);
+
+				//find md5 hash of loaded file
+				//find sha hash of loaded file
+				//check if such file already exists in folder project (last loaded promotions) - check both hashes
+				const lastPromoFilePath = path.join(this.lastPromotionDir, targetName);
+				const isFilesEqual = await this._compareFiles(lastPromoFilePath, targetFilePath);
+				if (isFilesEqual) {
+					//-- if such file already exists - ignore processing - response 304
+					return 304;
+				}
+				console.log(`[SLIDES][PUT] '${this.prefix}' new promo GIF start processing.`);
+				const parserProcess = fork(path.join(__dirname, 'SlideParser.js'), [targetFilePath, this.target], {});
+				const parser = this._setupParser(parserProcess);
+				parserProcess.send('start');
+				return parser;
+			};
+			//set gif parse task to queue 
+			const res = await SlidesServer._parseQueue.enqueue(parse, null, [request]);
+
+			// emit event about new slides
+			SlidesServer._S_emitter.emit('slides', this.target, this.cookie);
+
+			console.log(`[SLIDES][PUT] '${this.prefix}' result:`, res);
+			if (typeof res === 'number') {
+				console.log(`[SLIDES][PUT] '${this.prefix}' new promo is equal with old one. Ignore next processing!`);
+				response.sendStatus(res);
+				return;
+			}
+
+			//fork new child process and register it to queue
+			console.log(`[SLIDES][PUT] '${this.prefix}' await this.refresh().`);
+			await this.refresh();
+
+
+
+
+
+
+			response.sendStatus(200);
+		} catch (error) {
+			console.log(`[SLIDES][PUT][ERROR] '${this.prefix}'`, error);
+			response.sendStatus(500);
+		} finally {
+			await this._rmDirRecursively(tmpSlidesPath);
+		}
+
+
+
+
+
+		//copy file to storage of last loaded file '/var/lib/rik....'
+		//create temporary directory for saving new slides '/tmp/.....'
+		//parse this file to separated images and save to tmp directory created before
+		//send message to main process that files are already parsed
+		//close this child process and delete it from queue
+		//copy new slides from tmp directory to project directory '/opt/rik/public/media/slides....
+		//refresh slider
+		//delete temporary directory
+		//send response 200
+		//if error send response 500
+
 	}
 
-	get source(): string | void {
-		return this._currentSource;
+	async putSlides(this: SlidesServer, request: express.Request, response: express.Response) {
+		//set unlimited timeout
+		//to prevent empty reply from server due to long-time processing
+		response.setTimeout(0);
+
+		console.log(`[${this.prefix}][PUT] start putSlides()`);
+
+		let contentType: any = request.headers['content-type'];
+		if (
+			!_.all(
+				((contentType instanceof Array) ? contentType : [contentType]),
+				(content: string) => !!MimeIs.is(content, this.mimes)
+			)
+		) {
+			console.log(`[${this.prefix}][PUT] response.sendStatus(406)`);
+			response.sendStatus(406);
+			return;
+		}
+		let tmpDir: string | void;
+		let targetFilePath: string | void;
+		try {
+			let tmpDeferred = new Deferred<NodeJS.ErrnoException, [string]>();
+			let writeDeferred = new Deferred<NodeJS.ErrnoException, [void]>();
+			let dirPath = path.join(os.tmpdir(), "slides-");
+			fs.mkdtemp(dirPath, tmpDeferred.unsafe);
+			console.log(`[${this.prefix}][PUT] tmp dirPath`, dirPath);
+			[tmpDir] = await tmpDeferred.promise;
+			targetFilePath = path.join(tmpDir, "target");
+			console.log(`[${this.prefix}][PUT] targetFilePath`, targetFilePath);
+			let targetStream = fs.createWriteStream(targetFilePath);
+			request.pipe(targetStream);
+			request.on('error', writeDeferred.unsafe);
+			targetStream.on('close', writeDeferred.safe);
+			targetStream.on('error', writeDeferred.unsafe);
+			console.log(`[${this.prefix}][PUT] Incoming file saved`);
+			await writeDeferred.promise;
+			console.log(`[${this.prefix}][PUT] await writeDeferred.promise`);
+			// await this.save(targetFilePath);
+			console.log(`[${this.prefix}][PUT] save`, targetFilePath);
+			await this.refresh();
+			console.info(`[${this.prefix}][PUT] DONE`);
+			response.sendStatus(200);
+			console.info(`[${this.prefix}][PUT] response.sendStatus(200)`);
+		} catch (error) {
+			console.warn(`SliderApp.putSlides(request, response): ${error.stack}`);
+			response.sendStatus(500);
+		} finally {
+			console.log(`[${this.prefix}][PUT] block finally`);
+			if (typeof targetFilePath === 'string') {
+				console.log(`[${this.prefix}][PUT] finally targetFilePath === string`);
+				let existsDeferred = new Deferred<NodeJS.ErrnoException, [boolean]>();
+				fs.exists(targetFilePath, existsDeferred.safe);
+				let [exists] = await existsDeferred.promise;
+				if (exists) {
+					console.log(`[${this.prefix}][PUT] finally exists`, exists);
+					let unlinkDeferred = new Deferred<NodeJS.ErrnoException, [void]>();
+					console.log(`[${this.prefix}][PUT] fs.unlink`, targetFilePath);
+					fs.unlink(targetFilePath, unlinkDeferred.unsafe);
+					try {
+						console.log(`[${this.prefix}][PUT] finally unlinkDeferred.promise`);
+						await unlinkDeferred.promise;
+					} catch (error) {
+						console.warn(`SliderApp.putSlides(request, response): ${error.stack}`);
+					}
+				}
+				if (typeof tmpDir === 'string') {
+					console.log(`[${this.prefix}][PUT] finally tmpDir === string`);
+					let rmdirDeferred = new Deferred<NodeJS.ErrnoException, [void]>();
+					console.log(`[${this.prefix}][PUT] fs.rmdir`, tmpDir);
+					fs.rmdir(tmpDir, rmdirDeferred.unsafe);
+					try {
+						console.log(`[${this.prefix}][PUT] finally rmdirDeferred.promise`);
+						await rmdirDeferred.promise;
+					} catch (error) {
+						console.warn(`SliderApp.putSlides(request, response): ${error.stack}`);
+					}
+				}
+			}
+		}
+		console.log(`[${this.prefix}][PUT] Completed!!!`);
 	}
 
-	get sources(): string[] {
-		return this._sources;
+	async serveSlide(this: SlidesServer, request: express.Request, response: express.Response) {
+		let _id: string = request.params.id;
+		let _modified: string | void = request.params.modified;
+		let id: number;
+		let modified: number | void;
+		try {
+			id = parseInt(_id, 10);
+			if (typeof _modified === 'number') {
+				modified = parseInt(_modified, 10);
+			}
+		} catch (error) {
+			console.warn(`SliderApp.serveSlide(request, response): ${error.stack}`)
+			response.sendStatus(404);
+			return;
+		}
+		let parsedUrl = url.parse(request.url);
+		let slides = this.controller.slides;
+		if (0 <= id && id < slides.length) {
+			let slide = slides[id];
+			if (slide.reference !== parsedUrl.pathname) {
+				let html = redirectTemplate({
+					location: {
+						url: slide.reference,
+						title: slide.alt
+					}
+				});
+				response.statusCode = 301;
+				response.setHeader('Content-Type', 'text/html; charset=UTF-8');
+				response.setHeader('Content-Length', Buffer.byteLength(html));
+				response.setHeader('Content-Security-Policy', "default-src 'self'");
+				response.setHeader('X-Content-Type-Options', 'nosniff');
+				response.setHeader('Location', slide.reference);
+				response.end(html);
+			} else {
+				response.setHeader('Content-Type', slide.mime);
+				response.sendFile(slide.path);
+			}
+		} else {
+			response.sendStatus(404);
+		}
 	}
 
-	get controller(): ISliderController {
-		return this._controller;
-	}
-
-	get target(): string {
-		return this._target;
-	}
-
-	get cookie(): number {
-		return this._cookie;
-	}
-
-	get mimes(): string[] {
-		return this._mimes;
-	}
-
-	get lastPromotionDir(): string {
-		return this._lastPromotionDir;
+	async refresh(this: SlidesServer) {
+		let slides: ISlide[] = [];
+		try {
+			slides = await this._load();
+		} catch (error) {
+			console.warn(`SliderApp.refresh(): ${error.stack}`);
+			slides = [];
+		}
+		if (!_.isEqual(slides, this.controller.slides)) {
+			let running = this.controller.isRunning;
+			this.controller.slides = slides;
+		}
 	}
 
 	_onNewSlides(this: SlidesServer, directoryPath: string, cookie: number) {
-		if (this._cookie !== cookie) { // skipping current server
-			let directoryIndex = this._sources.indexOf(directoryPath);
-			let sourceIndex = typeof this._currentSource === 'string' ? this._sources.indexOf(this._currentSource) : -1;
+		if (this.cookie !== cookie) { // skipping current server
+			let directoryIndex = this.sources.indexOf(directoryPath);
+			let sourceIndex = typeof this._currentSource === 'string' ? this.sources.indexOf(this._currentSource) : -1;
 			if (directoryIndex >= 0 && (sourceIndex < 0 || directoryIndex <= sourceIndex)) {
 				this
 					.refresh()
 					.catch((error: Error) => {
-						console.warn(`SlidesServer[${this._cookie} / ${JSON.stringify(this._currentSource)}].refresh(): ${error.name}: ${error.message}`);
+						console.warn(`SlidesServer[${this.cookie} / ${JSON.stringify(this._currentSource)}].refresh(): ${error.name}: ${error.message}`);
 					});
 			}
 		}
-	}
-
-	async optionsSlides(this: SlidesServer, request: express.Request, response: express.Response) {
-		response.setHeader('Accept', this._mimes.join(', '));
-		response.setHeader('Access-Control-Allow-Methods', ['PUT', 'OPTIONS'].join(', '));
-		response.sendStatus(200);
 	}
 
 	private async _createDir(dirPath: string, mode?: string | number | null | undefined): Promise<void> {
@@ -271,7 +345,7 @@ export class SlidesServer extends EventEmitter {
 		if (
 			!_.all(
 				((contentType instanceof Array) ? contentType : [contentType]),
-				(content: string) => !!MimeIs.is(content, this._mimes)
+				(content: string) => !!MimeIs.is(content, this.mimes)
 			)
 		) {
 			return false;
@@ -343,11 +417,10 @@ export class SlidesServer extends EventEmitter {
 		return result;
 	}
 
-	private _parse(parserProcess: ChildProcess): Promise<any> {
+	private _setupParser(parserProcess: ChildProcess): Promise<any> {
 		console.time(`parse`);
-		console.log(`[SLIDES] '${this.prefix}' Fork parse process`);
+		console.log(`[SLIDES] '${this.prefix}' Fork parse process.`);
 		return new Promise((resolve, reject) => {
-			parserProcess.send('start');
 			//here we are waiting for message from SlideParser.ts when operation will be finished
 			parserProcess.on('message', async (data) => {
 				console.log(`[SLIDES] '${this.prefix}' Slides parsing is finished. Data: `, JSON.stringify(data));
@@ -370,249 +443,11 @@ export class SlidesServer extends EventEmitter {
 		})
 	}
 
-	async PutSlides(this: SlidesServer, request: express.Request, response: express.Response) {
-		//set unlimited timeout
-		//to prevent empty reply from server due to long-time processing
-		response.setTimeout(0);
-
-		const now = Date.now();
-
-		console.log(`[SLIDES][PUT] '${this.prefix}' Start saving slides.`);
-
-		//check if content type is 'image/gif'
-		const isMedia = this._checkContentType(request.headers);
-		if (!isMedia) {
-			console.log(`[SLIDES][PUT] '${this.prefix}' Response code 406. Not a media. Stop parse file.`);
-			response.sendStatus(406);
-			return;
-		}
-
-		//make temp dir for incoming gif file
-		const tmpSlidesPath = await this._makeTmpDir('slides-vik-');
-
-		try {
-			//write gif file to tmp dir (stream)
-			const targetName = 'target-' + this.prefix.replace(new RegExp('\\/', 'gi'), '');
-			const targetFilePath = path.join(tmpSlidesPath, targetName);
-			await this._writeTargetFile(targetFilePath, request);
-
-			//find md5 hash of loaded file
-			//find sha hash of loaded file
-			//check if such file already exists in folder project (last loaded promotions) - check both hashes
-			const lastPromoFilePath = path.join(this.lastPromotionDir, targetName);
-			const isFilesEqual = await this._compareFiles(lastPromoFilePath, targetFilePath);
-			if (isFilesEqual) {
-				//-- if such file already exists - ignore processing - response 304
-				console.log(`[SLIDES][PUT] '${this.prefix}' new promo is equal with old one. Ignore next processing!`);
-				response.sendStatus(304);
-				return;
-			}
-			console.log(`[SLIDES][PUT] '${this.prefix}' new promo GIF start processing.`);
-
-			//check if previous forked child processes exist and they count less then 'this._maxRunningProcessors'
-			//if child process more or equal - kill the last added process
-			const parse = async (imageFileName: string, parseDirectory: string) => {
-				const parser = fork(path.join(__dirname, 'SlideParser.js'));
-				return this._parse(parser);
-			};
-			const res = await SlidesServer._parseQueue.enqueue(parse, this, [targetFilePath, tmpSlidesPath]);
-			console.log(`[SLIDES][PUT] '${this.prefix}' result:`, res);
-
-			//fork new child process and register it to queue
-			// SlidesServer._parseQueue.set(now, parsePromise);
-			console.log(`[SLIDES][PUT] '${this.prefix}' await this.refresh().`);
-			await this.refresh();
-
-
-
-
-
-
-			response.sendStatus(200);
-		} catch (error) {
-			console.log(`[SLIDES][PUT][ERROR] '${this.prefix}'`, error);
-			response.sendStatus(500);
-		} finally {
-			await this._rmDirRecursively(tmpSlidesPath);
-		}
-
-
-
-
-
-		//copy file to storage of last loaded file '/var/lib/rik....'
-		//create temporary directory for saving new slides '/tmp/.....'
-		//parse this file to separated images and save to tmp directory created before
-		//send message to main process that files are already parsed
-		//close this child process and delete it from queue
-		//copy new slides from tmp directory to project directory '/opt/rik/public/media/slides....
-		//refresh slider
-		//delete temporary directory
-		//send response 200
-		//if error send response 500
-
-	}
-
-
-
-
-
-
-
-	async putSlides(this: SlidesServer, request: express.Request, response: express.Response) {
-		//set unlimited timeout
-		//to prevent empty reply from server due to long-time processing
-		response.setTimeout(0);
-
-		console.log(`[${this.prefix}][PUT] start putSlides()`);
-
-		let contentType: any = request.headers['content-type'];
-		if (
-			!_.all(
-				((contentType instanceof Array) ? contentType : [contentType]),
-				(content: string) => !!MimeIs.is(content, this._mimes)
-			)
-		) {
-			console.log(`[${this.prefix}][PUT] response.sendStatus(406)`);
-			response.sendStatus(406);
-			return;
-		}
-		let tmpDir: string | void;
-		let targetFilePath: string | void;
-		try {
-			let tmpDeferred = new Deferred<NodeJS.ErrnoException, [string]>();
-			let writeDeferred = new Deferred<NodeJS.ErrnoException, [void]>();
-			let dirPath = path.join(os.tmpdir(), "slides-");
-			fs.mkdtemp(dirPath, tmpDeferred.unsafe);
-			console.log(`[${this.prefix}][PUT] tmp dirPath`, dirPath);
-			[tmpDir] = await tmpDeferred.promise;
-			targetFilePath = path.join(tmpDir, "target");
-			console.log(`[${this.prefix}][PUT] targetFilePath`, targetFilePath);
-			let targetStream = fs.createWriteStream(targetFilePath);
-			request.pipe(targetStream);
-			request.on('error', writeDeferred.unsafe);
-			targetStream.on('close', writeDeferred.safe);
-			targetStream.on('error', writeDeferred.unsafe);
-			console.log(`[${this.prefix}][PUT] Incoming file saved`);
-			await writeDeferred.promise;
-			console.log(`[${this.prefix}][PUT] await writeDeferred.promise`);
-			await this.save(targetFilePath);
-			console.log(`[${this.prefix}][PUT] save`, targetFilePath);
-			await this.refresh();
-			console.info(`[${this.prefix}][PUT] DONE`);
-			response.sendStatus(200);
-			console.info(`[${this.prefix}][PUT] response.sendStatus(200)`);
-		} catch (error) {
-			console.warn(`SliderApp.putSlides(request, response): ${error.stack}`);
-			response.sendStatus(500);
-		} finally {
-			console.log(`[${this.prefix}][PUT] block finally`);
-			if (typeof targetFilePath === 'string') {
-				console.log(`[${this.prefix}][PUT] finally targetFilePath === string`);
-				let existsDeferred = new Deferred<NodeJS.ErrnoException, [boolean]>();
-				fs.exists(targetFilePath, existsDeferred.safe);
-				let [exists] = await existsDeferred.promise;
-				if (exists) {
-					console.log(`[${this.prefix}][PUT] finally exists`, exists);
-					let unlinkDeferred = new Deferred<NodeJS.ErrnoException, [void]>();
-					console.log(`[${this.prefix}][PUT] fs.unlink`, targetFilePath);
-					fs.unlink(targetFilePath, unlinkDeferred.unsafe);
-					try {
-						console.log(`[${this.prefix}][PUT] finally unlinkDeferred.promise`);
-						await unlinkDeferred.promise;
-					} catch (error) {
-						console.warn(`SliderApp.putSlides(request, response): ${error.stack}`);
-					}
-				}
-				if (typeof tmpDir === 'string') {
-					console.log(`[${this.prefix}][PUT] finally tmpDir === string`);
-					let rmdirDeferred = new Deferred<NodeJS.ErrnoException, [void]>();
-					console.log(`[${this.prefix}][PUT] fs.rmdir`, tmpDir);
-					fs.rmdir(tmpDir, rmdirDeferred.unsafe);
-					try {
-						console.log(`[${this.prefix}][PUT] finally rmdirDeferred.promise`);
-						await rmdirDeferred.promise;
-					} catch (error) {
-						console.warn(`SliderApp.putSlides(request, response): ${error.stack}`);
-					}
-				}
-			}
-		}
-		console.log(`[${this.prefix}][PUT] Completed!!!`);
-	}
-
-	async serveSlide(this: SlidesServer, request: express.Request, response: express.Response) {
-		let _id: string = request.params.id;
-		let _modified: string | void = request.params.modified;
-		let id: number;
-		let modified: number | void;
-		try {
-			id = parseInt(_id, 10);
-			if (typeof _modified === 'number') {
-				modified = parseInt(_modified, 10);
-			}
-		} catch (error) {
-			console.warn(`SliderApp.serveSlide(request, response): ${error.stack}`)
-			response.sendStatus(404);
-			return;
-		}
-		let parsedUrl = url.parse(request.url);
-		let slides = this._controller.slides;
-		if (0 <= id && id < slides.length) {
-			let slide = slides[id];
-			if (slide.reference !== parsedUrl.pathname) {
-				let html = redirectTemplate({
-					location: {
-						url: slide.reference,
-						title: slide.alt
-					}
-				});
-				response.statusCode = 301;
-				response.setHeader('Content-Type', 'text/html; charset=UTF-8');
-				response.setHeader('Content-Length', Buffer.byteLength(html));
-				response.setHeader('Content-Security-Policy', "default-src 'self'");
-				response.setHeader('X-Content-Type-Options', 'nosniff');
-				response.setHeader('Location', slide.reference);
-				response.end(html);
-			} else {
-				response.setHeader('Content-Type', slide.mime);
-				response.sendFile(slide.path);
-			}
-		} else {
-			response.sendStatus(404);
-		}
-	}
-
-	async refresh(this: SlidesServer) {
-		let slides: ISlide[] = [];
-		try {
-			slides = await this._load();
-		} catch (error) {
-			console.warn(`SliderApp.refresh(): ${error.stack}`);
-			slides = [];
-		}
-		if (!_.isEqual(slides, this._controller.slides)) {
-			let running = this._controller.isRunning;
-			this._controller.slides = slides;
-		}
-	}
-
-	async save(this: SlidesServer, sourcePath: string) {
-		let existsDeferred = new Deferred<NodeJS.ErrnoException, [boolean]>();
-		fs.exists(sourcePath, existsDeferred.safe);
-		let [exists] = await existsDeferred.promise;
-		if (!exists) {
-			throw new Error(`${JSON.stringify(sourcePath)} does not exists`);
-		}
-		await this._save(sourcePath);
-		SlidesServer._S_emitter.emit('slides', this.target, this.cookie);
-	}
-
 	async _load(this: SlidesServer): Promise<ISlide[]> {
 		let slides: ISlide[] = [];
 		for (let source of this.sources) {
 			try {
-				slides = await loadSlides(this.prefix, source, this._mimes);
+				slides = await loadSlides(this.prefix, source, this.mimes);
 				if (slides instanceof Array && slides.length > 0) {
 					this._currentSource = source;
 					return slides;
@@ -625,143 +460,62 @@ export class SlidesServer extends EventEmitter {
 		return [];
 	}
 
-	async _save(this: SlidesServer, sourcePath: string) {
-		let targetDirectory = this.target;
-		try {
-			let deferred = new Deferred<NodeJS.ErrnoException, [fs.Stats]>();
-			fs.stat(targetDirectory, deferred.unsafe);
-			let [stat] = await deferred.promise;
-			if (!stat.isDirectory()) {
-				throw new Error(`${JSON.stringify(targetDirectory)} is not directory`);
+	private _validateOptions(options: Partial<ISlideServerOptions> | undefined, _options: ISlideServerOptions) {
+		if (typeof options !== 'undefined') {
+			if (typeof options !== 'object') {
+				throw new TypeError('Instance of object expected as options');
 			}
-		} catch (error) {
-			throw new Error(`Invalid target directory. Reason: ${error.message}`);
-		}
-		let originalFiles: string[] = [];
-		try {
-			let deferred = new Deferred<NodeJS.ErrnoException, [string[]]>();
-			fs.readdir(this.target, deferred.unsafe);
-			let [files] = await deferred.promise;
-			originalFiles = files.map((file) => path.join(targetDirectory, file));
-		} catch (error) {
-			console.warn(`SliderApp._save(sourcePath): ${error.stack}`);
-		}
-		let newFiles: string[] = [];
-		let graph = gm(sourcePath);
-		try {
-			let globalIdentifyDeferred = new Deferred<Error, [gm.ImageInfo | IAnimationInfo]>();
-			graph.identify(globalIdentifyDeferred.unsafe);
-			let [imageFormat] = await globalIdentifyDeferred.promise;
-			if (isAnimationInfo(imageFormat)) {
-				let {
-					Delay: _delay,
-					size,
-					'Background Color': background,
-					'Border Color': _border,
-					'Page geometry': _geometry,
-					'Compose': compose
-				} = imageFormat;
-				let delay: number[] = _delay
-					.map((value: any): number => {
-						switch (typeof value) {
-							case 'string':
-								return parseInt(value, 10);
-							case 'number':
-								return value;
-							default:
-								return 0;
-						}
-					})
-					.map((value) => value * 10);
-				let geometry: (IFrameGeometry | null)[] = _geometry
-					.map((geometryString): IFrameGeometry | null => {
-						let match = /^(\d+)x(\d+)[+](\d+)[+](\d+)$/.exec(geometryString);
-						if (match instanceof Array) {
-							return {
-								width: parseInt(match[1], 10),
-								height: parseInt(match[2], 10),
-								left: parseInt(match[3], 10),
-								top: parseInt(match[4], 10)
-							};
-						} else {
-							return null;
-						}
-					});
-				let tmpSlidePath = path.join(targetDirectory, '_tmp.gif');
-				let lastSlidePath = path.join(targetDirectory, '_last.gif');
-				for (let slide = 0; slide !== delay.length; ++slide) {
-					let targetDelay = delay[slide].toString(10);
-					let targetIndex = pad(slide, 10, '0', 4);
-					let targetFilePath = path.join(targetDirectory, `slide.${targetIndex}.${targetDelay}.gif`);
-
-					if (slide === 0) {
-						let writeDeferred = new Deferred<Error, [string, string, string]>();
-						gm(size.width, size.height, background[0])
-							.write(lastSlidePath = targetFilePath, writeDeferred.unsafe);
-						await writeDeferred.promise;
-					}
-
-					{
-						let tmpDeferred = new Deferred<Error, [string, string, string]>();
-						(graph as any).selectFrame(slide); // @todo State.selectFrame(slide: number)
-						(graph as any).out('+adjoin'); // @todo State.out(option: string)
-						graph.write(tmpSlidePath, tmpDeferred.unsafe);
-						await tmpDeferred.promise;
-					}
-
-					{
-						let slideGeometry = geometry[slide];
-						if (slideGeometry === null) {
-							slideGeometry = {
-								width: 0,
-								height: 0,
-								left: 0,
-								top: 0
-							};
-						}
-						let writeDeferred = new Deferred<Error, [string, string, string]>();
-						let local_image = gm(lastSlidePath);
-						(local_image as any).composite(tmpSlidePath); // @todo State.composite(imagePath: string)
-						local_image.geometry(`+${slideGeometry.left}+${slideGeometry.top}`);
-						local_image.compose(compose[slide]);
-						local_image.write(lastSlidePath = targetFilePath, writeDeferred.unsafe);
-						await writeDeferred.promise;
-					}
-
-					try {
-						let unlinkDeferred = new Deferred<NodeJS.ErrnoException, [void]>();
-						fs.unlink(tmpSlidePath, unlinkDeferred.unsafe);
-						await unlinkDeferred.promise;
-					} catch (error) {
-						// ignore
-					}
-
-					newFiles.push(targetFilePath);
+			if (typeof options.prefix !== 'undefined') {
+				if (typeof options.prefix !== 'string') {
+					throw new TypeError('Instance of string expected as options.prefix');
 				}
-			} else {
-				let writeDeferred = new Deferred<Error, [string, string, string]>();
-				let targetFilePath = path.join(targetDirectory, `slide.0000.0.jpg`);
-				graph.write(targetFilePath, writeDeferred.unsafe);
-				await writeDeferred.promise;
-				newFiles.push(targetFilePath);
+				else {
+					_options.prefix = options.prefix;
+				}
 			}
-		} catch (error) {
-			throw new Error(`Invalid source. Reason: ${error.message}`);
-		}
-		for (let original of originalFiles) {
-			if (newFiles.indexOf(original) < 0) {
-				try {
-					let deferred = new Deferred<NodeJS.ErrnoException, [void]>();
-					fs.unlink(original, deferred.unsafe);
-					await deferred.promise;
-				} catch (error) {
-					console.warn(`SliderApp._save(sourcePath): ${error.stack}`);
+			if (typeof options.target !== 'undefined') {
+				if (typeof options.target !== 'string') {
+					throw new TypeError('Instance of string expected as options.target');
+				}
+				else {
+					_options.target = options.target;
+				}
+			}
+			if (typeof options.sources !== 'undefined') {
+				if (!(options.sources instanceof Array && _.all(options.sources, (value) => typeof value === 'string'))) {
+					throw new TypeError('Instance of string[] expected as options.sources');
+				}
+				else {
+					_options.sources = options.sources;
+				}
+			}
+			if (typeof options.interval !== 'undefined') {
+				if (!(typeof options.interval === 'number' && options.interval > 0)) {
+					throw new TypeError('Instance of positive number expected as options.interval');
+				}
+				else {
+					_options.interval = options.interval;
+				}
+			}
+			if (typeof options.mimes !== 'undefined') {
+				if (!(options.mimes instanceof Array && _.all(options.mimes, (value) => typeof value === 'string'))) {
+					throw new TypeError('Instance of string[] expected as options.mimes');
+				}
+				else {
+					_options.mimes = options.mimes;
+				}
+			}
+			if (typeof options.lastPromotionDir !== 'undefined') {
+				if (typeof options.lastPromotionDir !== 'string') {
+					throw new TypeError('Instance of string expected as options.lastPromotionDir');
+				}
+				else {
+					_options.lastPromotionDir = options.lastPromotionDir;
 				}
 			}
 		}
 	}
 }
-
 
 // Usage example
 /**
@@ -785,7 +539,7 @@ if (require.main === module) {
 		lastPromotionDir: lastPromo
 	});
 	secapp.controller.on('changed', (value) => {
-		// console.info('[SECONDARY][CHANGED]', JSON.stringify(value).slice(0, 100));
+		console.info('[SECONDARY][CHANGED]', JSON.stringify(value).slice(0, 100));
 		if (!secapp.controller.isRunning) {
 			secapp.controller.start();
 		}
@@ -804,7 +558,7 @@ if (require.main === module) {
 	});
 
 	mainapp.controller.on('changed', (value) => {
-		// console.info('[MAIN][CHANGED]', JSON.stringify(value).slice(0, 100));
+		console.info('[MAIN][CHANGED]', JSON.stringify(value).slice(0, 100));
 		if (!mainapp.controller.isRunning) {
 			mainapp.controller.start();
 		}
