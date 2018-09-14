@@ -5,7 +5,6 @@
   "main": "distribution/index.js",
   "types": "distribution/index.d.ts",
   "scripts": {
-    "prepublish": "npm run build",
     "build": "tsc",
     "compile": "tsc",
     "compile-watch": "tsc --watch",
@@ -33,7 +32,7 @@
     "@types/mmmagic": "^0.4.29",
     "@types/type-is": "^1.6.0",
     "@types/underscore": "^1.8.3",
-    "typescript": "^2.5.2"
+    "typescript": "^3.0.0"
   },
   "engines": {
     "node": ">=7.5.0"
