@@ -5,5 +5,5 @@ export interface ISlideServerOptions {
     sources: string[];
     interval: number;
     mimes: string[];
-    lastPromotionDir: string; //dir where saved last loaded '*.gif' file with promotions 
+    lastSliderDir: string; //dir where saved last loaded '*.gif' file with promotions 
 }

@@ -35,7 +35,7 @@ export class SlidesServer extends EventEmitter {
 			sources: [],
 			interval: 1000,
 			mimes: getImageMime(),
-			lastPromotionDir: path.join(os.tmpdir(), 'lastpromo')
+			lastSliderDir: path.join(os.tmpdir(), 'last-slide')
 		};
 	}
 
@@ -60,7 +60,7 @@ export class SlidesServer extends EventEmitter {
 		this.sources = _options.sources;
 		this._currentSource = undefined;
 		this.mimes = _options.mimes;
-		this.lastPromotionDir = _options.lastPromotionDir;
+		this.lastPromotionDir = _options.lastSliderDir;
 		this._createDir(this.lastPromotionDir, 0o644);
 		this.express.get(path.posix.join(prefix, 'slides', ':id', ':modified'), this.serveSlide.bind(this));
 		this.express.get(path.posix.join(prefix, 'slides', ':id'), this.serveSlide.bind(this));
@@ -116,7 +116,10 @@ export class SlidesServer extends EventEmitter {
 					return 304;
 				}
 				console.log(`[SLIDES][PUT] '${this.prefix}' new promo GIF start processing.`);
-				const parserProcess = fork(path.join(__dirname, 'SlideParser.js'), [targetFilePath, this.target], {});
+				const resultSlidesDir = path.join(tmpSlidesPath, 'slides');
+				//create temporary directory for saving new slides '/tmp/.../slides'
+				await this._createDir(resultSlidesDir, 0o644);
+				const parserProcess = fork(path.join(__dirname, 'SlideParser.js'), [targetFilePath, resultSlidesDir, this.lastPromotionDir, this.target], {});
 				const parser = this._setupParser(parserProcess);
 				parserProcess.send('start');
 				return parser;
@@ -125,9 +128,8 @@ export class SlidesServer extends EventEmitter {
 			//fork new child process and register it to queue
 			const res = await SlidesServer._parseQueue.enqueue(parse, null, [request]);
 
-
 			console.log(`[SLIDES][PUT] '${this.prefix}' result:`, res);
-			if (typeof res === 'number') {
+			if (typeof res === 'number' && res === 304) {
 				console.log(`[SLIDES][PUT] '${this.prefix}' new promo is equal with old one. Ignore next processing!`);
 				response.sendStatus(res);
 				return;
@@ -136,119 +138,24 @@ export class SlidesServer extends EventEmitter {
 			// emit event about new slides
 			SlidesServer._S_emitter.emit('slides', this.target, this.cookie);
 
+			//refresh slider
 			console.log(`[SLIDES][PUT] '${this.prefix}' await this.refresh().`);
 			await this.refresh();
 
-
-
-
-
-
+			//send response 200 if success
 			response.sendStatus(200);
 		} catch (error) {
+			//if error send response 500
 			console.log(`[SLIDES][PUT][ERROR] '${this.prefix}'`, error);
 			response.sendStatus(500);
-		} finally {
-			await this._rmDirRecursively(tmpSlidesPath);
 		}
 
-
-
-
-
-		//copy file to storage of last loaded file '/var/lib/rik....'
-		//create temporary directory for saving new slides '/tmp/.....'
-		//parse this file to separated images and save to tmp directory created before
-		//send message to main process that files are already parsed
-		//close this child process and delete it from queue
-		//copy new slides from tmp directory to project directory '/opt/rik/public/media/slides....
-		//refresh slider
 		//delete temporary directory
-		//send response 200
-		//if error send response 500
-
-	}
-
-	async putSlides(this: SlidesServer, request: express.Request, response: express.Response) {
-		//set unlimited timeout
-		//to prevent empty reply from server due to long-time processing
-		response.setTimeout(0);
-
-		console.log(`[${this.prefix}][PUT] start putSlides()`);
-
-		let contentType: any = request.headers['content-type'];
-		if (
-			!_.all(
-				((contentType instanceof Array) ? contentType : [contentType]),
-				(content: string) => !!MimeIs.is(content, this.mimes)
-			)
-		) {
-			console.log(`[${this.prefix}][PUT] response.sendStatus(406)`);
-			response.sendStatus(406);
-			return;
-		}
-		let tmpDir: string | void;
-		let targetFilePath: string | void;
 		try {
-			let tmpDeferred = new Deferred<NodeJS.ErrnoException, [string]>();
-			let writeDeferred = new Deferred<NodeJS.ErrnoException, [void]>();
-			let dirPath = path.join(os.tmpdir(), "slides-");
-			fs.mkdtemp(dirPath, tmpDeferred.unsafe);
-			console.log(`[${this.prefix}][PUT] tmp dirPath`, dirPath);
-			[tmpDir] = await tmpDeferred.promise;
-			targetFilePath = path.join(tmpDir, "target");
-			console.log(`[${this.prefix}][PUT] targetFilePath`, targetFilePath);
-			let targetStream = fs.createWriteStream(targetFilePath);
-			request.pipe(targetStream);
-			request.on('error', writeDeferred.unsafe);
-			targetStream.on('close', writeDeferred.safe);
-			targetStream.on('error', writeDeferred.unsafe);
-			console.log(`[${this.prefix}][PUT] Incoming file saved`);
-			await writeDeferred.promise;
-			console.log(`[${this.prefix}][PUT] await writeDeferred.promise`);
-			// await this.save(targetFilePath);
-			console.log(`[${this.prefix}][PUT] save`, targetFilePath);
-			await this.refresh();
-			console.info(`[${this.prefix}][PUT] DONE`);
-			response.sendStatus(200);
-			console.info(`[${this.prefix}][PUT] response.sendStatus(200)`);
+			await this._rmDirRecursively(tmpSlidesPath);
 		} catch (error) {
-			console.warn(`SliderApp.putSlides(request, response): ${error.stack}`);
-			response.sendStatus(500);
-		} finally {
-			console.log(`[${this.prefix}][PUT] block finally`);
-			if (typeof targetFilePath === 'string') {
-				console.log(`[${this.prefix}][PUT] finally targetFilePath === string`);
-				let existsDeferred = new Deferred<NodeJS.ErrnoException, [boolean]>();
-				fs.exists(targetFilePath, existsDeferred.safe);
-				let [exists] = await existsDeferred.promise;
-				if (exists) {
-					console.log(`[${this.prefix}][PUT] finally exists`, exists);
-					let unlinkDeferred = new Deferred<NodeJS.ErrnoException, [void]>();
-					console.log(`[${this.prefix}][PUT] fs.unlink`, targetFilePath);
-					fs.unlink(targetFilePath, unlinkDeferred.unsafe);
-					try {
-						console.log(`[${this.prefix}][PUT] finally unlinkDeferred.promise`);
-						await unlinkDeferred.promise;
-					} catch (error) {
-						console.warn(`SliderApp.putSlides(request, response): ${error.stack}`);
-					}
-				}
-				if (typeof tmpDir === 'string') {
-					console.log(`[${this.prefix}][PUT] finally tmpDir === string`);
-					let rmdirDeferred = new Deferred<NodeJS.ErrnoException, [void]>();
-					console.log(`[${this.prefix}][PUT] fs.rmdir`, tmpDir);
-					fs.rmdir(tmpDir, rmdirDeferred.unsafe);
-					try {
-						console.log(`[${this.prefix}][PUT] finally rmdirDeferred.promise`);
-						await rmdirDeferred.promise;
-					} catch (error) {
-						console.warn(`SliderApp.putSlides(request, response): ${error.stack}`);
-					}
-				}
-			}
+			console.error(`[SLIDES][PUT][ERROR] '${this.prefix}' Cant remove temporary dir recursively:`, error.message);
 		}
-		console.log(`[${this.prefix}][PUT] Completed!!!`);
 	}
 
 	async serveSlide(this: SlidesServer, request: express.Request, response: express.Response) {
@@ -412,7 +319,7 @@ export class SlidesServer extends EventEmitter {
 			result = _.isEqual(oldHash, newHash);
 			console.log(`Hash:`, 'oldHash', oldHash, 'new hash', newHash, 'are equal:', result);
 		} catch (error) {
-			console.error(`[SLIDES][ERROR] '${this.prefix}' compare files`, error.message);
+			console.error(`[SLIDES][WARN] '${this.prefix}' compare files`, error.message);
 			result = false;
 		}
 		console.timeEnd(`compareFiles`);
@@ -426,7 +333,10 @@ export class SlidesServer extends EventEmitter {
 			//here we are waiting for message from SlideParser.ts when operation will be finished
 			parserProcess.on('message', async (data) => {
 				console.log(`[SLIDES] '${this.prefix}' Slides parsing is finished. Data: `, JSON.stringify(data));
-				resolve(data);
+				switch (data) {
+					case 500: reject(500); break;
+					default: resolve(data);
+				}
 				console.timeEnd(`parse`);
 				parserProcess.kill();
 			});
@@ -507,12 +417,12 @@ export class SlidesServer extends EventEmitter {
 					_options.mimes = options.mimes;
 				}
 			}
-			if (typeof options.lastPromotionDir !== 'undefined') {
-				if (typeof options.lastPromotionDir !== 'string') {
+			if (typeof options.lastSliderDir !== 'undefined') {
+				if (typeof options.lastSliderDir !== 'string') {
 					throw new TypeError('Instance of string expected as options.lastPromotionDir');
 				}
 				else {
-					_options.lastPromotionDir = options.lastPromotionDir;
+					_options.lastSliderDir = options.lastSliderDir;
 				}
 			}
 		}
@@ -528,7 +438,7 @@ if (require.main === module) {
 	const secondary = path.join(root, 'images', 'secondary');
 	const main = path.join(root, 'images', 'main');
 	const fallback = path.join(root, 'images', 'fallback');
-	const lastPromo = path.join(root, 'lastpromo');
+	const lastSlider = path.join(root, 'last-slider');
 
 	let secapp = new SlidesServer({
 		prefix: '/secondary',
@@ -538,7 +448,7 @@ if (require.main === module) {
 			main,
 			fallback,
 		],
-		lastPromotionDir: lastPromo
+		lastSliderDir: lastSlider
 	});
 	secapp.controller.on('changed', (value) => {
 		console.info('[SECONDARY][CHANGED]', JSON.stringify(value).slice(0, 100));
@@ -556,7 +466,7 @@ if (require.main === module) {
 			main,
 			fallback,
 		],
-		lastPromotionDir: lastPromo
+		lastSliderDir: lastSlider
 	});
 
 	mainapp.controller.on('changed', (value) => {

@@ -1,10 +1,12 @@
 import * as gm from "gm";
 import * as fs from 'fs';
 import * as path from 'path';
+import { promisify } from 'util';
 import { Deferred } from './Deferred';
 import { pad } from "./utilities";
 import { IAnimationInfo } from "./interfaces/IAnimationInfo";
 import { IFrameGeometry } from "./interfaces/IFrameGeometry";
+import { ISlideParseOptions } from "./interfaces/ISlideParseOptions";
 
 
 function isAnimationInfo(info: gm.ImageInfo | IAnimationInfo): info is IAnimationInfo {
@@ -13,15 +15,40 @@ function isAnimationInfo(info: gm.ImageInfo | IAnimationInfo): info is IAnimatio
 
 class SlideParser {
 
-    async save(this: SlideParser, sourceFilePath: string, targetDirPath: string): Promise<void> {
-        let existsDeferred = new Deferred<NodeJS.ErrnoException, [boolean]>();
-        fs.exists(sourceFilePath, existsDeferred.safe);
-        let [exists] = await existsDeferred.promise;
+    async save(this: SlideParser, options: ISlideParseOptions): Promise<void> {
+        const { sourceFilePath, targetDirPath, lastSlideDir, workDir } = options;
+        let exists = await promisify(fs.exists)(sourceFilePath);
         if (!exists) {
             throw new Error(`${JSON.stringify(sourceFilePath)} does not exists`);
         }
+
+        //parse this file to separated images and save to tmp directory created before
         await this._save(sourceFilePath, targetDirPath);
-        // SlidesServer._S_emitter.emit('slides', this.target, this.cookie);
+        try {
+            //copy file to storage of last loaded file '/..../last-slide'
+            await this._moveFile(sourceFilePath, lastSlideDir);
+
+            //copy new slides from tmp directory to project directory '/...../public/media/slides/{main,secondary}....
+            await this._moveSlides(targetDirPath, workDir);
+        } catch (error) {
+            console.log(`[SLIDE_PARSER] Error move slides:`, error.message);
+            const name = path.basename(sourceFilePath);
+            await promisify(fs.unlink)(path.join(lastSlideDir, name));
+            throw new Error(error);
+        }
+    }
+
+    private _moveFile(sourceFilePath: string, lastPromoDir: string): Promise<void> {
+        const name = path.basename(sourceFilePath);
+        const destFilePath = path.join(lastPromoDir, name);
+        return promisify(fs.rename)(sourceFilePath, destFilePath);
+    }
+
+    private async _moveSlides(targetDirPath: string, workDir: string): Promise<void> {
+        const slideNames = (await promisify(fs.readdir)(targetDirPath))
+            .map(fileName => path.join(targetDirPath, fileName));
+        const movePromises = slideNames.map(slide => this._moveFile(slide, workDir));
+        await Promise.all(movePromises);
     }
 
     async _save(this: SlideParser, sourceFilePath: string, targetDirPath: string) {
@@ -158,21 +185,29 @@ class SlideParser {
             }
         }
     }
-
-
 }
 
 const argv = process.argv.slice(2);
 const source = argv[0];
 const target = argv[1];
+const lastSlideDir = argv[2];
+const slidesWorkDir = argv[3];
 
 process.on('message', async (msg) => {
-    console.log(`[SLIDE-PARSER] Process received message: ${msg}.`);
-    console.log(`source`, source, `target`, target);
+    console.log(`Start forked process to parse slide files!!!`);
     const parser = new SlideParser();
-    await parser.save(source, target);
+    try {
+        await parser.save({ sourceFilePath: source, targetDirPath: target, lastSlideDir, workDir: slidesWorkDir });
+    } catch (error) {
+        console.log(`[SLIDE PARSER]`, error.message);
+        if (process.send) {
+            process.send(500);
+        }
+        return;
+    }
     if (process.send) {
-        process.send('200');
+        //send message to main process that files are already parsed
+        process.send(200);
     } else {
         console.log(`[SLIDE-PARSER] Can't send message about operation complete. process.send is 'undefined'`);
     }
