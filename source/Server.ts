@@ -13,7 +13,6 @@ import * as url from "url";
 
 import { ISliderController, SliderController } from "./SliderController";
 import { getImageMime, loadSlides } from "./utilities";
-import { Deferred } from "./Deferred";
 import { ISlide } from "./Slide";
 import { Queue } from "./queue/task.queue";
 import { IInternalEmitter } from "./interfaces/IInternalEmitter";
@@ -64,7 +63,7 @@ export class SlidesServer extends EventEmitter {
 		this._createDir(this.lastPromotionDir, 0o644);
 		this.express.get(path.posix.join(prefix, 'slides', ':id', ':modified'), this.serveSlide.bind(this));
 		this.express.get(path.posix.join(prefix, 'slides', ':id'), this.serveSlide.bind(this));
-		this.express.put(path.posix.join(prefix, 'slides'), this.PutSlides.bind(this));
+		this.express.put(path.posix.join(prefix, 'slides'), this.putSlides.bind(this));
 		this.express.options(path.posix.join(prefix, 'slides'), this.optionsSlides.bind(this));
 
 		this.controller = new SliderController();
@@ -80,7 +79,7 @@ export class SlidesServer extends EventEmitter {
 		response.sendStatus(200);
 	}
 
-	async PutSlides(this: SlidesServer, request: express.Request, response: express.Response) {
+	async putSlides(this: SlidesServer, request: express.Request, response: express.Response) {
 		//set unlimited timeout
 		//to prevent empty reply from server due to long-time processing
 		response.setTimeout(0);
@@ -96,7 +95,7 @@ export class SlidesServer extends EventEmitter {
 		}
 
 		//make temp dir for incoming gif file
-		const tmpSlidesPath = await this._makeTmpDir('slides-vik-');
+		const tmpSlidesPath = await this._makeTmpDir('slides-');
 
 		try {
 			const parse = async (request: express.Request) => {
@@ -119,8 +118,8 @@ export class SlidesServer extends EventEmitter {
 				const resultSlidesDir = path.join(tmpSlidesPath, 'slides');
 				//create temporary directory for saving new slides '/tmp/.../slides'
 				await this._createDir(resultSlidesDir, 0o644);
-				const parserProcess = fork(path.join(__dirname, 'SlideParser.js'), [targetFilePath, resultSlidesDir, this.lastPromotionDir, this.target], {});
-				const parser = this._setupParser(parserProcess);
+				const parserProcess = fork(path.join(__dirname, 'SlideParser.js'), [targetFilePath, resultSlidesDir], {});
+				const parser = this._setupParser(parserProcess, targetFilePath, resultSlidesDir, this.lastPromotionDir, this.target);
 				parserProcess.send('start');
 				return parser;
 			};
@@ -131,7 +130,7 @@ export class SlidesServer extends EventEmitter {
 			console.log(`[SLIDES][PUT] '${this.prefix}' result:`, res);
 			if (typeof res === 'number' && res === 304) {
 				console.log(`[SLIDES][PUT] '${this.prefix}' new promo is equal with old one. Ignore next processing!`);
-				response.sendStatus(res);
+				response.sendStatus(304);
 				return;
 			}
 
@@ -156,6 +155,8 @@ export class SlidesServer extends EventEmitter {
 		} catch (error) {
 			console.error(`[SLIDES][PUT][ERROR] '${this.prefix}' Cant remove temporary dir recursively:`, error.message);
 		}
+
+		console.log(`[SLIDES][PUT] Complete.`);
 	}
 
 	async serveSlide(this: SlidesServer, request: express.Request, response: express.Response) {
@@ -273,7 +274,6 @@ export class SlidesServer extends EventEmitter {
 	}
 
 	private async _rmDirRecursively(dir: string): Promise<void> {
-		console.time(`rmDirRecursive`);
 		console.log(`[SLIDES][${this.prefix}] Remove dir recursively`, dir);
 		if (await promisify(fs.exists)(dir)) {
 			const content = (await promisify(fs.readdir)(dir)).map(async file => {
@@ -287,7 +287,6 @@ export class SlidesServer extends EventEmitter {
 			await Promise.all(content);
 			await promisify(fs.rmdir)(dir);
 		}
-		console.timeEnd(`rmDirRecursive`);
 	}
 
 	private _writeTargetFile(filePath: string, request: express.Request): Promise<void> {
@@ -326,10 +325,10 @@ export class SlidesServer extends EventEmitter {
 		return result;
 	}
 
-	private _setupParser(parserProcess: ChildProcess): Promise<any> {
+	private async _setupParser(parserProcess: ChildProcess, source: string, target: string, lastSlidesDir: string, slidesWorkDir: string): Promise<any> {
 		console.time(`parse`);
 		console.log(`[SLIDES] '${this.prefix}' Fork parse process.`);
-		return new Promise((resolve, reject) => {
+		const result = await new Promise((resolve, reject) => {
 			//here we are waiting for message from SlideParser.ts when operation will be finished
 			parserProcess.on('message', async (data) => {
 				console.log(`[SLIDES] '${this.prefix}' Slides parsing is finished. Data: `, JSON.stringify(data));
@@ -352,7 +351,44 @@ export class SlidesServer extends EventEmitter {
 				}
 				resolve();
 			});
-		})
+		});
+
+		try {
+			//copy file to storage of last loaded file '/..../last-slider'
+			console.log(`[SLIDES][${this.prefix}] Move GIF file to storage of last loaded file '/..../last-slider'...`);
+			await this._moveFile(source, lastSlidesDir);
+			//delete old slides from work directory '/...../public/media/slides/{main,secondary}....'
+			console.log(`[SLIDES][${this.prefix}] Delete old slides from working directory '/...../public/media/slides/{main,secondary}....'`);
+			await this._clearOldSlides(/*slidesWorkDir*/);
+			//move new slides from tmp directory to project directory '/...../public/media/slides/{main,secondary}....
+			console.log(`[SLIDES][${this.prefix}] Move new slides from tmp directory to project directory '/...../public/media/slides/{main,secondary}....'`);
+			await this._moveSlides(target, slidesWorkDir);
+		} catch (error) {
+			console.log(`[SLIDES][${this.prefix}][ERROR]`, error.message);
+			const name = path.basename(source);
+			console.log(`[SLIDES][${this.prefix}] Delete GIF file from storage of last loaded file '/..../last-slider'...`);
+			await promisify(fs.unlink)(path.join(lastSlidesDir, name));
+		}
+
+		return result;
+	}
+
+	private _moveFile(sourceFilePath: string, lastPromoDir: string): Promise<void> {
+		const name = path.basename(sourceFilePath);
+		const destFilePath = path.join(lastPromoDir, name);
+		return promisify(fs.rename)(sourceFilePath, destFilePath);
+	}
+
+	private async _clearOldSlides(): Promise<void[]> {
+		const slideNames = this.controller.slides.map(slide => slide.path);
+		const deletePromises = slideNames.map(slide => promisify(fs.unlink)(slide));
+		return await Promise.all(deletePromises);
+	}
+
+	private async _moveSlides(targetDirPath: string, workDir: string): Promise<void[]> {
+		const slideNames = (await loadSlides(this.prefix, targetDirPath, this.mimes)).map(slide => slide.path);
+		const movePromises = slideNames.map(slide => this._moveFile(slide, workDir));
+		return await Promise.all(movePromises);
 	}
 
 	async _load(this: SlidesServer): Promise<ISlide[]> {
