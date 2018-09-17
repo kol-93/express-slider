@@ -125,6 +125,7 @@ export class SlidesServer extends EventEmitter {
 			};
 
 			//fork new child process and register it to queue
+			console.log(`[SLIDES][PUT] '${this.prefix}' Tasks in queue to parse:`, SlidesServer._parseQueue.size);
 			const res = await SlidesServer._parseQueue.enqueue(parse, null, [request]);
 
 			console.log(`[SLIDES][PUT] '${this.prefix}' result:`, res);
