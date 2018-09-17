@@ -132,18 +132,19 @@ export class SlidesServer extends EventEmitter {
 			if (typeof res === 'number' && res === 304) {
 				console.log(`[SLIDES][PUT] '${this.prefix}' new promo is equal with old one. Ignore next processing!`);
 				response.sendStatus(304);
-				return;
+			} else {
+				
+				// emit event about new slides
+				SlidesServer._S_emitter.emit('slides', this.target, this.cookie);
+	
+				//refresh slider
+				console.log(`[SLIDES][PUT] '${this.prefix}' await this.refresh().`);
+				await this.refresh();
+	
+				//send response 200 if success
+				response.sendStatus(200);
 			}
 
-			// emit event about new slides
-			SlidesServer._S_emitter.emit('slides', this.target, this.cookie);
-
-			//refresh slider
-			console.log(`[SLIDES][PUT] '${this.prefix}' await this.refresh().`);
-			await this.refresh();
-
-			//send response 200 if success
-			response.sendStatus(200);
 		} catch (error) {
 			//if error send response 500
 			console.log(`[SLIDES][PUT][ERROR] '${this.prefix}'`, error);
