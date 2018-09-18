@@ -184,7 +184,7 @@ export class Ticker extends EventEmitter implements ITicker {
 			this._timeout = setTimeout(this._processor.bind(this, expectedCall), timeout);
 			if (timeout === 0) {
 				this.emit('throttle', expectedCall - current);
-				console.warn('[THROTTLE]', expectedCall - current);
+				console.warn(`[THROTTLE] Tick '${this._tick}'`, expectedCall - current);
 			}
 		} else {
 			this._timeout = null;
