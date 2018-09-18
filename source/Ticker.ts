@@ -1,4 +1,5 @@
 import { EventEmitter } from "events";
+import { setTimeout, clearTimeout } from 'timers';
 import * as _ from "underscore";
 
 export type TickCallback = (item: ITickItem, tick: number) => void;
@@ -7,6 +8,9 @@ export type StopCallback = () => void;
 export type ThrottleCallback = (tick: number, time: number) => void;
 
 export interface ITickItem {
+	/**
+	 * Time in milliseconds to show tick item
+	 */
 	time?: number;
 }
 
@@ -20,12 +24,24 @@ export function isTickItem(value: any): value is ITickItem {
 }
 
 export interface ITickerOptions {
+	/**
+	 * Fallback time in milliseconds to show tick item
+	 */
 	interval: number;
+	/**
+	 * Tick items
+	 */
 	ticks: ITickItem[];
 }
 
 export interface ITicker extends EventEmitter, ITickerOptions {
+	/**
+	 * Current tick item's index
+	 */
 	readonly tick: number;
+	/**
+	 * Is ticker running?
+	 */
 	readonly isRunning: boolean;
 
 	start(this: ITicker): void;
@@ -74,7 +90,7 @@ export interface ITicker extends EventEmitter, ITickerOptions {
 export class Ticker extends EventEmitter implements ITicker {
 	private _interval: number;
 	private _ticks: ITickItem[];
-	private _timeout: any;
+	private _timeout: NodeJS.Timer | null;
 	private _tick: number;
 
 	private static _checkTicks(ticks: ITickItem[]): boolean {
@@ -147,7 +163,7 @@ export class Ticker extends EventEmitter implements ITicker {
 
 	pause(this: Ticker) {
 		if (this.isRunning) {
-			clearTimeout(this._timeout);
+			clearTimeout(this._timeout!);
 			this._timeout = null;
 			return true;
 		} else {
@@ -167,29 +183,30 @@ export class Ticker extends EventEmitter implements ITicker {
 	}
 
 	private _processor(this: Ticker, expectedCall: number): void {
-		this._tick = this._tick % Math.max(this._ticks.length, 1);
-		let tickItem: ITickItem = {};
-		let interval = this._interval;
-		if (this._ticks.length > 0) {
-			tickItem = this._ticks[this._tick];
-		}
-		this.emit('tick', tickItem, this._tick);
-		if (typeof tickItem.time === 'number' && tickItem.time > 0) {
-			interval = tickItem.time;
-		}
-		if (interval > 0) {
-			let current = Date.now();
-			expectedCall += interval;
-			let timeout = Math.max(expectedCall - current, 0);
-			this._timeout = setTimeout(this._processor.bind(this, expectedCall), timeout);
-			if (timeout === 0) {
-				this.emit('throttle', expectedCall - current);
-				console.warn(`[THROTTLE] Tick '${this._tick}'`, expectedCall - current);
+		let running = true;
+		while (running) {
+			this._tick = this._tick % Math.max(this._ticks.length, 1);
+			const tickItem = this._ticks.length !== 0 ? this._ticks[this._tick] : {};
+			const interval = typeof tickItem.time === 'number' && tickItem.time >= 0 ? tickItem.time : this._interval;
+			if (interval <= 0) {
+				this._timeout = null;
+				this.emit('tick', tickItem, this._tick);
+				this.emit('stop');
+				running = false;
+			} else {
+				const current = Date.now();
+				expectedCall += interval;
+				const timeout = expectedCall - current;
+				if (timeout < 1) {
+					this.emit('throttle', timeout);
+					console.warn(`[THROTTLE] Tick '${this._tick}'`, timeout);
+				} else {
+					this.emit('tick', tickItem, this._tick);
+					this._timeout = setTimeout(this._processor.bind(this, expectedCall), timeout);
+					running = false;
+				}
 			}
-		} else {
-			this._timeout = null;
-			this.emit('stop');
+			this._tick += 1;
 		}
-		this._tick += 1;
 	}
 }

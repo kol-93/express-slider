@@ -1,13 +1,13 @@
-import * as gm from "gm";
 import * as fs from 'fs';
+import * as gifFrames from "gif-frames";
+import * as gm from "gm";
+import * as os from 'os';
 import * as path from 'path';
 import { promisify } from 'util';
-import { Deferred } from './Deferred';
+
 import { pad } from "./utilities";
 import { IAnimationInfo } from "./interfaces/IAnimationInfo";
-import { IFrameGeometry } from "./interfaces/IFrameGeometry";
 import { ISlideParseOptions } from "./interfaces/ISlideParseOptions";
-
 
 function isAnimationInfo(info: gm.ImageInfo | IAnimationInfo): info is IAnimationInfo {
     return 'Delay' in info;
@@ -28,139 +28,60 @@ class SlideParser {
 
     async _save(this: SlideParser, sourceFilePath: string, targetDirPath: string) {
         try {
-            let deferred = new Deferred<NodeJS.ErrnoException, [fs.Stats]>();
-            fs.stat(targetDirPath, deferred.unsafe);
-            let [stat] = await deferred.promise;
+            let stat = await promisify(fs.stat)(targetDirPath);
             if (!stat.isDirectory()) {
                 throw new Error(`${JSON.stringify(targetDirPath)} is not directory`);
             }
         } catch (error) {
             throw new Error(`Invalid target directory. Reason: ${error.message}`);
         }
-        let originalFiles: string[] = [];
-        try {
-            let deferred = new Deferred<NodeJS.ErrnoException, [string[]]>();
-            fs.readdir(targetDirPath, deferred.unsafe);
-            let [files] = await deferred.promise;
-            originalFiles = files.map((file) => path.join(targetDirPath, file));
-        } catch (error) {
-            console.warn(`SliderApp._save(sourcePath): ${error.stack}`);
-        }
         let newFiles: string[] = [];
-        let graph = gm(sourceFilePath);
-        try {
-            let globalIdentifyDeferred = new Deferred<Error, [gm.ImageInfo | IAnimationInfo]>();
-            graph.identify(globalIdentifyDeferred.unsafe);
-            let [imageFormat] = await globalIdentifyDeferred.promise;
-            if (isAnimationInfo(imageFormat)) {
-                let {
-                    Delay: _delay,
-                    size,
-                    'Background Color': background,
-                    'Border Color': _border,
-                    'Page geometry': _geometry,
-                    'Compose': compose
-                } = imageFormat;
-                let delay: number[] = _delay
-                    .map((value: any): number => {
-                        switch (typeof value) {
-                            case 'string':
-                                return parseInt(value, 10);
-                            case 'number':
-                                return value;
-                            default:
-                                return 0;
-                        }
-                    })
-                    .map((value) => value * 10);
-                let geometry: (IFrameGeometry | null)[] = _geometry
-                    .map((geometryString): IFrameGeometry | null => {
-                        let match = /^(\d+)x(\d+)[+](\d+)[+](\d+)$/.exec(geometryString);
-                        if (match instanceof Array) {
-                            return {
-                                width: parseInt(match[1], 10),
-                                height: parseInt(match[2], 10),
-                                left: parseInt(match[3], 10),
-                                top: parseInt(match[4], 10)
-                            };
-                        } else {
-                            return null;
-                        }
-                    });
-                let tmpSlidePath = path.join(targetDirPath, '_tmp.gif');
-                let lastSlidePath = path.join(targetDirPath, '_last.gif');
-                for (let slide = 0; slide !== delay.length; ++slide) {
-                    let targetDelay = delay[slide].toString(10);
-                    let targetIndex = pad(slide, 10, '0', 4);
-                    let targetFilePath = path.join(targetDirPath, `slide.${targetIndex}.${targetDelay}.gif`);
-
-                    if (slide === 0) {
-                        let writeDeferred = new Deferred<Error, [string, string, string]>();
-                        gm(size.width, size.height, background[0])
-                            .write(lastSlidePath = targetFilePath, writeDeferred.unsafe);
-                        await writeDeferred.promise;
-                    }
-
-                    {
-                        let tmpDeferred = new Deferred<Error, [string, string, string]>();
-                        (graph as any).selectFrame(slide); // @todo State.selectFrame(slide: number)
-                        (graph as any).out('+adjoin'); // @todo State.out(option: string)
-                        graph.write(tmpSlidePath, tmpDeferred.unsafe);
-                        await tmpDeferred.promise;
-                    }
-
-                    {
-                        let slideGeometry = geometry[slide];
-                        if (slideGeometry === null) {
-                            slideGeometry = {
-                                width: 0,
-                                height: 0,
-                                left: 0,
-                                top: 0
-                            };
-                        }
-                        let writeDeferred = new Deferred<Error, [string, string, string]>();
-                        let local_image = gm(lastSlidePath);
-                        (local_image as any).composite(tmpSlidePath); // @todo State.composite(imagePath: string)
-                        local_image.geometry(`+${slideGeometry.left}+${slideGeometry.top}`);
-                        local_image.compose(compose[slide]);
-                        local_image.write(lastSlidePath = targetFilePath, writeDeferred.unsafe);
-                        await writeDeferred.promise;
-                    }
-
-                    try {
-                        let unlinkDeferred = new Deferred<NodeJS.ErrnoException, [void]>();
-                        fs.unlink(tmpSlidePath, unlinkDeferred.unsafe);
-                        await unlinkDeferred.promise;
-                    } catch (error) {
-                        // ignore
-                    }
-
-                    if (slide % 10 === 9) {
-                        console.log(`[SLIDE-PARSE] parsed %d / %d`, slide + 1, delay.length);
-                    }
-                    newFiles.push(targetFilePath);
-                }
-                console.log(`[SLIDE-PARSE] parsed %d / %d`, delay.length, delay.length);
-            } else {
-                let writeDeferred = new Deferred<Error, [string, string, string]>();
-                let targetFilePath = path.join(targetDirPath, `slide.0000.0.jpg`);
-                graph.write(targetFilePath, writeDeferred.unsafe);
-                await writeDeferred.promise;
+        const graph = gm(sourceFilePath);
+        console.time('gm.identify');
+        const rawMeta = (await promisify(graph.identify.bind(graph))('%m %T\n') as string);
+        console.timeEnd('gm.identify');
+        const meta = rawMeta
+            .split(os.EOL)
+            .map((line) => {
+                const match = /^([^\s]+)\s+([0-9]+)$/.exec(line);
+                return {
+                    format: match![1],
+                    time: parseInt(match![2], 10) * 10
+                };
+            });
+        switch (meta.length) {
+            case 0:
+                throw new Error(`Image invalid`);
+            case 1: {
+                let targetFilePath = path.join(targetDirPath, `slide.0000.0000.jpg`);
+                await promisify(graph.write.bind(graph))(targetFilePath);
                 newFiles.push(targetFilePath);
             }
-        } catch (error) {
-            throw new Error(`Invalid source. Reason: ${error.message}`);
-        }
-        for (let original of originalFiles) {
-            if (newFiles.indexOf(original) < 0) {
-                try {
-                    let deferred = new Deferred<NodeJS.ErrnoException, [void]>();
-                    fs.unlink(original, deferred.unsafe);
-                    await deferred.promise;
-                } catch (error) {
-                    console.warn(`SliderApp._save(sourcePath): ${error.stack}`);
+                break;
+            default: {
+                console.time('gifFrames.read');
+                const framesData = await gifFrames({ url: sourceFilePath, outputType: 'jpg', cumulative: true, frames: 'all' });
+                console.timeEnd('gifFrames.read');
+                console.time('gifFrames.write');
+                for (let frame of framesData) {
+                    const targetName = path.join(targetDirPath, `slide.${pad(frame.frameIndex, 10, '0', 4)}.${pad(meta[frame.frameIndex].time, 10, '0', 4)}.jpg`);
+                    const targetStream = fs.createWriteStream(targetName);
+                    try {
+                        const sourceStream = frame.getImage();
+                        await new Promise((resolve, reject) => {
+                            sourceStream.pipe(targetStream);
+                            targetStream.once('close', resolve);
+                            targetStream.once('error', reject);
+                        });
+                        if (frame.frameIndex % 20 === 19) {
+                            console.log(`[SLIDES] Parsed ${frame.frameIndex + 1} of ${framesData.length}`)
+                        }
+                    } finally {
+                        targetStream.removeAllListeners();
+                    }
                 }
+                console.log(`[SLIDES] Parsed ${framesData.length} of ${framesData.length}`);
+                console.timeEnd('gifFrames.write');
             }
         }
     }

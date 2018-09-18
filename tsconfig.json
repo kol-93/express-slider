@@ -13,6 +13,7 @@
     "noImplicitReturns": true
   },
   "include": [
+    "types/**/*.d.ts",
     "source/**/*.ts"
   ],
   "exclude": [
