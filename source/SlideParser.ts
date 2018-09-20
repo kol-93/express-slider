@@ -73,14 +73,14 @@ class SlideParser {
                             targetStream.once('close', resolve);
                             targetStream.once('error', reject);
                         });
-                        if (frame.frameIndex % 20 === 19) {
-                            console.log(`[SLIDES] Parsed ${frame.frameIndex + 1} of ${framesData.length}`)
+                        if (frame.frameIndex % 20 === 0) {
+                            console.log(`[SLIDE-PARSER] Parsed ${frame.frameIndex} of ${framesData.length}`)
                         }
                     } finally {
                         targetStream.removeAllListeners();
                     }
                 }
-                console.log(`[SLIDES] Parsed ${framesData.length} of ${framesData.length}`);
+                console.log(`[SLIDE-PARSER] Parsed ${framesData.length} of ${framesData.length}`);
                 console.timeEnd('gifFrames.write');
             }
         }
@@ -92,7 +92,7 @@ const source = argv[0];
 const target = argv[1];
 
 process.on('message', async (msg) => {
-    console.log(`[SLIDE-PARSE] Message: ${msg}`);
+    console.log(`[SLIDE-PARSER] Receive message: ${msg}`);
     const parser = new SlideParser();
     try {
         console.log(`[SLIDE-PARSER] Parse slides to dir '${target}'....`);

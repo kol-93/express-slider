@@ -84,12 +84,12 @@ export class SlidesServer extends EventEmitter {
 		//to prevent empty reply from server due to long-time processing
 		response.setTimeout(0);
 
-		console.log(`[SLIDES][PUT] '${this.prefix}' Start saving slides.`);
+		console.log(`[SLIDE-SERVER][${this.prefix}] Start saving slides.`);
 
 		//check if content type is 'image/gif'
 		const isMedia = this._checkContentType(request.headers);
 		if (!isMedia) {
-			console.log(`[SLIDES][PUT] '${this.prefix}' Response code 406. Not a media. Stop parse file.`);
+			console.log(`[SLIDE-SERVER][${this.prefix}] Response code 406. Not a media. Stop parse file.`);
 			response.sendStatus(406);
 			return;
 		}
@@ -114,7 +114,7 @@ export class SlidesServer extends EventEmitter {
 					//-- if such file already exists - ignore processing - response 304
 					return 304;
 				}
-				console.log(`[SLIDES][PUT] '${this.prefix}' new promo GIF start processing.`);
+				console.log(`[SLIDE-SERVER][${this.prefix}] New promo GIF start processing.`);
 				const resultSlidesDir = path.join(tmpSlidesPath, 'slides');
 				//create temporary directory for saving new slides '/tmp/.../slides'
 				await this._createDir(resultSlidesDir, 0o644);
@@ -125,29 +125,29 @@ export class SlidesServer extends EventEmitter {
 			};
 
 			//fork new child process and register it to queue
-			console.log(`[SLIDES][PUT] '${this.prefix}' Tasks in queue to parse:`, SlidesServer._parseQueue.size);
+			console.log(`[SLIDE-SERVER][${this.prefix}] Tasks in queue to parse:`, SlidesServer._parseQueue.size);
 			const res = await SlidesServer._parseQueue.enqueue(parse, null, [request]);
 
-			console.log(`[SLIDES][PUT] '${this.prefix}' result:`, res);
+			console.log(`[SLIDE-SERVER][${this.prefix}] Parse result:`, res);
 			if (typeof res === 'number' && res === 304) {
-				console.log(`[SLIDES][PUT] '${this.prefix}' new promo is equal with old one. Ignore next processing!`);
+				console.log(`[SLIDE-SERVER][${this.prefix}] New promo is equal with old one. Ignore next processing!`);
 				response.sendStatus(304);
 			} else {
-				
+
 				// emit event about new slides
 				SlidesServer._S_emitter.emit('slides', this.target, this.cookie);
-	
+
 				//refresh slider
-				console.log(`[SLIDES][PUT] '${this.prefix}' await this.refresh().`);
+				console.log(`[SLIDE-SERVER][${this.prefix}] Refresh.`);
 				await this.refresh();
-	
+
 				//send response 200 if success
 				response.sendStatus(200);
 			}
 
 		} catch (error) {
 			//if error send response 500
-			console.log(`[SLIDES][PUT][ERROR] '${this.prefix}'`, error);
+			console.log(`[SLIDE-SERVER][${this.prefix}][ERROR]`, error);
 			response.sendStatus(500);
 		}
 
@@ -155,10 +155,10 @@ export class SlidesServer extends EventEmitter {
 		try {
 			await this._rmDirRecursively(tmpSlidesPath);
 		} catch (error) {
-			console.error(`[SLIDES][PUT][ERROR] '${this.prefix}' Cant remove temporary dir recursively:`, error.message);
+			console.error(`[SLIDE-SERVER][${this.prefix}][ERROR] Cant remove temporary dir recursively:`, error.message);
 		}
 
-		console.log(`[SLIDES][PUT] Complete.`);
+		console.log(`[SLIDE-SERVER][${this.prefix}] Complete!`);
 	}
 
 	async serveSlide(this: SlidesServer, request: express.Request, response: express.Response) {
@@ -233,10 +233,10 @@ export class SlidesServer extends EventEmitter {
 
 	private async _createDir(dirPath: string, mode?: string | number | null | undefined): Promise<void> {
 		console.time(`createdir`);
-		console.log(`[SLIDES][${this.prefix}] Start to create dir:`, dirPath, `mode:`, mode);
+		console.log(`[SLIDE-SERVER][${this.prefix}] Start to create dir:`, dirPath, `mode:`, mode);
 		try {
 			await promisify(fs.access)(dirPath, fs.constants.R_OK | fs.constants.W_OK);
-			console.log(`[SLIDES][${this.prefix}] Last promotion dir already exists.`);
+			console.log(`[SLIDE-SERVER][${this.prefix}] Last promotion dir already exists.`);
 			return;
 		} catch (error) {
 			//do nothing
@@ -245,7 +245,7 @@ export class SlidesServer extends EventEmitter {
 			//create folder
 			await promisify(fs.mkdir)(dirPath, mode || 0o644);
 		} catch (error) {
-			console.error(`[SLIDES][${this.prefix}][ERROR] Create dir`, error.message);
+			console.error(`[SLIDE-SERVER][${this.prefix}][ERROR] Create dir`, error.message);
 		}
 		console.timeEnd(`createdir`);
 	}
@@ -253,7 +253,7 @@ export class SlidesServer extends EventEmitter {
 	private _checkContentType(headers: IncomingHttpHeaders): boolean {
 		console.time(`checkcontent`);
 		let contentType: any = headers['content-type'];
-		console.log(`[SLIDES][${this.prefix}] Check content type`, contentType);
+		console.log(`[SLIDE-SERVER][${this.prefix}] Check content type`, contentType);
 		if (
 			!_.all(
 				((contentType instanceof Array) ? contentType : [contentType]),
@@ -268,7 +268,7 @@ export class SlidesServer extends EventEmitter {
 
 	private async _makeTmpDir(prefix: string): Promise<string> {
 		console.time(`makeTmpDir`);
-		console.log(`[SLIDES][${this.prefix}] Make temporary dir, prefix:`, prefix);
+		console.log(`[SLIDE-SERVER][${this.prefix}] Make temporary dir, prefix:`, prefix);
 		const tmpPath = path.join(os.tmpdir(), prefix);
 		const result = promisify(fs.mkdtemp)(tmpPath, 'utf8');
 		console.timeEnd(`makeTmpDir`);
@@ -276,7 +276,7 @@ export class SlidesServer extends EventEmitter {
 	}
 
 	private async _rmDirRecursively(dir: string): Promise<void> {
-		console.log(`[SLIDES][${this.prefix}] Remove dir recursively`, dir);
+		console.log(`[SLIDE-SERVER][${this.prefix}] Remove dir recursively`, dir);
 		if (await promisify(fs.exists)(dir)) {
 			const content = (await promisify(fs.readdir)(dir)).map(async file => {
 				const curPath = path.join(dir, file);
@@ -293,7 +293,7 @@ export class SlidesServer extends EventEmitter {
 
 	private _writeTargetFile(filePath: string, request: express.Request): Promise<void> {
 		console.time(`writeTargetFile`);
-		console.log(`[SLIDES][${this.prefix}] Write target file`, filePath);
+		console.log(`[SLIDE-SERVER][${this.prefix}] Write target file`, filePath);
 		const targetStream = fs.createWriteStream(filePath, { autoClose: true });
 		request.pipe(targetStream);
 		const writeResult = new Promise<void>((resolve, reject) => {
@@ -307,7 +307,7 @@ export class SlidesServer extends EventEmitter {
 
 	private async _compareFiles(oldFilePath: string, newFilePath: string): Promise<boolean> {
 		console.time(`compareFiles`);
-		console.log(`[SLIDES][${this.prefix}] Compare files`, oldFilePath, newFilePath);
+		console.log(`[SLIDE-SERVER][${this.prefix}] Compare files`, oldFilePath, newFilePath);
 		let result = false;
 		try {
 			//check if exists and can read
@@ -318,9 +318,9 @@ export class SlidesServer extends EventEmitter {
 			const oldHash = crypto.createHash('md5').update(oldFile).digest('hex');
 			const newHash = crypto.createHash('md5').update(newFile).digest('hex');
 			result = _.isEqual(oldHash, newHash);
-			console.log(`Hash:`, 'oldHash', oldHash, 'new hash', newHash, 'are equal:', result);
+			console.log(`[SLIDE-SERVER][${this.prefix}] Hash:`, 'oldHash', oldHash, 'new hash', newHash, 'are equal? =>', result);
 		} catch (error) {
-			console.error(`[SLIDES][WARN] '${this.prefix}' compare files`, error.message);
+			console.error(`[SLIDE-SERVER][${this.prefix}][WARN] Compare files`, error.message);
 			result = false;
 		}
 		console.timeEnd(`compareFiles`);
@@ -329,11 +329,11 @@ export class SlidesServer extends EventEmitter {
 
 	private async _setupParser(parserProcess: ChildProcess, source: string, target: string, lastSlidesDir: string, slidesWorkDir: string): Promise<any> {
 		console.time(`parse`);
-		console.log(`[SLIDES] '${this.prefix}' Fork parse process.`);
+		console.log(`[SLIDE-SERVER][${this.prefix}] Setup fork parse process.`);
 		const result = await new Promise((resolve, reject) => {
 			//here we are waiting for message from SlideParser.ts when operation will be finished
 			parserProcess.on('message', async (data) => {
-				console.log(`[SLIDES] '${this.prefix}' Slides parsing is finished. Data: `, JSON.stringify(data));
+				console.log(`[SLIDE-SERVER][${this.prefix}] Slides parsing is finished. Data: `, JSON.stringify(data));
 				switch (data) {
 					case 500: reject(500); break;
 					default: resolve(data);
@@ -342,12 +342,12 @@ export class SlidesServer extends EventEmitter {
 				parserProcess.kill();
 			});
 			parserProcess.on('error', (error: Error) => {
-				console.log(`FORK ERROR`);
+				console.log(`[SLIDE-SERVER][${this.prefix}] FORK ERROR`);
 				reject(error);
 				parserProcess.kill();
 			});
 			parserProcess.on('close', (code: number, signal: string) => {
-				console.log(`FORK CLOSE`);
+				console.log(`[SLIDE-SERVER][${this.prefix}] FORK CLOSE`);
 				if (code !== 0) {
 					reject(code);
 				}
@@ -357,18 +357,18 @@ export class SlidesServer extends EventEmitter {
 
 		try {
 			//copy file to storage of last loaded file '/..../last-slider'
-			console.log(`[SLIDES][${this.prefix}] Move GIF file to storage of last loaded file '/..../last-slider'...`);
+			console.log(`[SLIDE-SERVER][${this.prefix}] Move GIF file to storage of last loaded file '/..../last-slider'...`);
 			await this._moveFile(source, lastSlidesDir);
 			//delete old slides from work directory '/...../public/media/slides/{main,secondary}....'
-			console.log(`[SLIDES][${this.prefix}] Delete old slides from working directory '/...../public/media/slides/{main,secondary}....'`);
+			console.log(`[SLIDE-SERVER][${this.prefix}] Delete old slides from working directory '/...../public/media/slides/{main,secondary}....'`);
 			await this._clearOldSlides(/*slidesWorkDir*/);
 			//move new slides from tmp directory to project directory '/...../public/media/slides/{main,secondary}....
-			console.log(`[SLIDES][${this.prefix}] Move new slides from tmp directory to project directory '/...../public/media/slides/{main,secondary}....'`);
+			console.log(`[SLIDE-SERVER][${this.prefix}] Move new slides from tmp directory to project directory '/...../public/media/slides/{main,secondary}....'`);
 			await this._moveSlides(target, slidesWorkDir);
 		} catch (error) {
-			console.log(`[SLIDES][${this.prefix}][ERROR]`, error.message);
+			console.log(`[SLIDE-SERVER][${this.prefix}][ERROR]`, error.message);
 			const name = path.basename(source);
-			console.log(`[SLIDES][${this.prefix}] Delete GIF file from storage of last loaded file '/..../last-slider'...`);
+			console.log(`[SLIDE-SERVER][${this.prefix}] Delete GIF file from storage of last loaded file '/..../last-slider'...`);
 			await promisify(fs.unlink)(path.join(lastSlidesDir, name));
 		}
 
