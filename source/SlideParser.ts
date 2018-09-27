@@ -102,7 +102,8 @@ class SlideParser {
                 const framesData = await gifFrames({ url: sourceFilePath, outputType: 'jpg', cumulative: true, frames: 'all' });
                 console.timeEnd('gifFrames.read');
                 console.time('gifFrames.write');
-                const step = Math.floor(framesData.length / 100);
+                const step = framesData.length / 100;
+                let previousProgress = 0;
                 for (let frame of framesData) {
                     const targetName = path.join(targetDirPath, `slide.${pad(frame.frameIndex, 10, '0', 4)}.${pad(meta[frame.frameIndex].time, 10, '0', 4)}.jpg`);
                     const targetStream = fs.createWriteStream(targetName);
@@ -114,14 +115,15 @@ class SlideParser {
                             targetStream.once('error', reject);
                         });
 
-
-                        if (this._socketIO && step > 0 && frame.frameIndex % step === 0) {
+                        const currentProgress = Math.floor(frame.frameIndex / step);
+                        if (this._socketIO && step > 0 && (currentProgress - previousProgress) > 1) {
                             const emitData: IProgressLoading = {
-                                value: frame.frameIndex / step,
+                                value: parseFloat((frame.frameIndex / step).toFixed(2)),
                                 source: 'Slide',
                                 unit: '%'
                             };
                             this._socketIO.emit('messages', JSON.stringify({ type: 'ProgressBar', value: emitData }));
+                            previousProgress = currentProgress;
                         }
 
                         if (frame.frameIndex % 20 === 0) {
