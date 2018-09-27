@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as SocketIOClient from "socket.io-client";
 import * as gifFrames from "gif-frames";
 import * as gm from "gm";
 import * as os from 'os';
@@ -8,12 +9,49 @@ import { promisify } from 'util';
 import { pad } from "./utilities";
 import { IAnimationInfo } from "./interfaces/IAnimationInfo";
 import { ISlideParseOptions } from "./interfaces/ISlideParseOptions";
+import { IProgressLoading } from './interfaces/IProgressLoading';
+
+
+const argv = process.argv.slice(2);
+const source = argv[0];
+const target = argv[1];
+const port = argv[2];
+
+process.on('message', async (msg) => {
+    console.log(`[SLIDE-PARSER] Receive message: ${msg}`);
+    const parser = new SlideParser(parseInt(port));
+    try {
+        console.log(`[SLIDE-PARSER] Parse slides to dir '${target}'....`);
+        await parser.save({ sourceFilePath: source, targetDirPath: target });
+    } catch (error) {
+        console.log(`[SLIDE-PARSER][ERROR]`, error.message);
+        if (process.send) {
+            process.send(500);
+        }
+        return;
+    }
+    if (process.send) {
+        //send message to main process that files are already parsed
+        process.send(200);
+    } else {
+        console.log(`[SLIDE-PARSER] Can't send message about operation complete. process.send is 'undefined'`);
+    }
+});
+
 
 function isAnimationInfo(info: gm.ImageInfo | IAnimationInfo): info is IAnimationInfo {
     return 'Delay' in info;
 }
 
 class SlideParser {
+    private _socketIO: SocketIOClient.Socket | null;
+
+    constructor(port: number) {
+        this._socketIO = null; //by default;
+        if (port > 0 && port < 65535) {
+            this._socketIO = SocketIOClient.connect(`http://localhost:${port}`, { transports: ['websocket'] });
+        }
+    }
 
     async save(this: SlideParser, options: ISlideParseOptions): Promise<void> {
         const { sourceFilePath, targetDirPath } = options;
@@ -63,6 +101,7 @@ class SlideParser {
                 const framesData = await gifFrames({ url: sourceFilePath, outputType: 'jpg', cumulative: true, frames: 'all' });
                 console.timeEnd('gifFrames.read');
                 console.time('gifFrames.write');
+                const step = Math.floor(framesData.length / 100);
                 for (let frame of framesData) {
                     const targetName = path.join(targetDirPath, `slide.${pad(frame.frameIndex, 10, '0', 4)}.${pad(meta[frame.frameIndex].time, 10, '0', 4)}.jpg`);
                     const targetStream = fs.createWriteStream(targetName);
@@ -73,6 +112,17 @@ class SlideParser {
                             targetStream.once('close', resolve);
                             targetStream.once('error', reject);
                         });
+
+
+                        if (this._socketIO && step > 0 && frame.frameIndex % step === 0) {
+                            const emitData: IProgressLoading = {
+                                value: frame.frameIndex * step,
+                                source: 'Slide',
+                                unit: '%'
+                            };
+                            this._socketIO.emit('messages', JSON.stringify({ type: 'ProgressBar', value: emitData }));
+                        }
+
                         if (frame.frameIndex % 20 === 0) {
                             console.log(`[SLIDE-PARSER] Parsed ${frame.frameIndex} of ${framesData.length}`)
                         }
@@ -86,28 +136,3 @@ class SlideParser {
         }
     }
 }
-
-const argv = process.argv.slice(2);
-const source = argv[0];
-const target = argv[1];
-
-process.on('message', async (msg) => {
-    console.log(`[SLIDE-PARSER] Receive message: ${msg}`);
-    const parser = new SlideParser();
-    try {
-        console.log(`[SLIDE-PARSER] Parse slides to dir '${target}'....`);
-        await parser.save({ sourceFilePath: source, targetDirPath: target });
-    } catch (error) {
-        console.log(`[SLIDE-PARSER][ERROR]`, error.message);
-        if (process.send) {
-            process.send(500);
-        }
-        return;
-    }
-    if (process.send) {
-        //send message to main process that files are already parsed
-        process.send(200);
-    } else {
-        console.log(`[SLIDE-PARSER] Can't send message about operation complete. process.send is 'undefined'`);
-    }
-});

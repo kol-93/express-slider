@@ -34,7 +34,7 @@ export class SlidesServer extends EventEmitter {
 			sources: [],
 			interval: 1000,
 			mimes: getImageMime(),
-			lastSliderDir: path.join(os.tmpdir(), 'last-slide')
+			lastSliderDir: path.join(os.tmpdir(), 'last-slide'),
 		};
 	}
 
@@ -48,6 +48,7 @@ export class SlidesServer extends EventEmitter {
 	readonly controller: ISliderController;
 	readonly mimes: string[];
 	readonly lastPromotionDir: string;
+	readonly portLoadingProgress: number | undefined;
 
 	constructor(options?: Partial<ISlideServerOptions>) {
 		super();
@@ -118,7 +119,8 @@ export class SlidesServer extends EventEmitter {
 				const resultSlidesDir = path.join(tmpSlidesPath, 'slides');
 				//create temporary directory for saving new slides '/tmp/.../slides'
 				await this._createDir(resultSlidesDir, 0o644);
-				const parserProcess = fork(path.join(__dirname, 'SlideParser.js'), [targetFilePath, resultSlidesDir], {});
+				const port = (this.portLoadingProgress || 0).toString();
+				const parserProcess = fork(path.join(__dirname, 'SlideParser.js'), [targetFilePath, resultSlidesDir, port], {});
 				const parser = this._setupParser(parserProcess, targetFilePath, resultSlidesDir, this.lastPromotionDir, this.target);
 				parserProcess.send('start');
 				return parser;
@@ -461,6 +463,14 @@ export class SlidesServer extends EventEmitter {
 				}
 				else {
 					_options.lastSliderDir = options.lastSliderDir;
+				}
+			}
+			if (typeof options.portLoadingProgress !== 'undefined') {
+				if (typeof options.portLoadingProgress !== 'number') {
+					throw new TypeError('Instance of number expected as options.portLoadingProgress');
+				}
+				else {
+					_options.portLoadingProgress = options.portLoadingProgress;
 				}
 			}
 		}
