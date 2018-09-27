@@ -1,6 +1,6 @@
 {
   "name": "express-slider",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "Node.JS/TypeScript Express Slider Middleware",
   "main": "distribution/index.js",
   "types": "distribution/index.d.ts",
@@ -20,10 +20,13 @@
   "author": "kol1993@gmail.com",
   "license": "GPL-3.0",
   "dependencies": {
+    "build": "^0.1.4",
     "express": "^4.15.4",
     "gif-frames": "^0.4.1",
     "gm": "^1.23.0",
     "mmmagic": "^0.4.5",
+    "npm": "^6.4.1",
+    "run": "^1.4.0",
     "socket.io": "^2.1.1",
     "type-is": "^1.6.15",
     "underscore": "^1.8.3"
