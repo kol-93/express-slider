@@ -128,13 +128,13 @@ class SlideParser {
                             console.log(`[SLIDE-PARSER] Parsed ${frame.frameIndex} of ${framesData.length}`)
                         }
                     } finally {
-                        if (this._socketIO) {
-                            this._socketIO.emit('messages', JSON.stringify({ type: 'ProgressBar', value: { value: 100, source: 'Slide', unit: '%' } }));
-                        }
                         targetStream.removeAllListeners();
                     }
                 }
                 console.log(`[SLIDE-PARSER] Parsed ${framesData.length} of ${framesData.length}`);
+                if (this._socketIO) {
+                    this._socketIO.emit('messages', JSON.stringify({ type: 'ProgressBar', value: { value: 100, source: 'Slide', unit: '%' } }));
+                }
                 console.timeEnd('gifFrames.write');
             }
         }

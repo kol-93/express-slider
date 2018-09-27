@@ -1,6 +1,6 @@
 {
   "name": "express-slider",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "description": "Node.JS/TypeScript Express Slider Middleware",
   "main": "distribution/index.js",
   "types": "distribution/index.d.ts",
