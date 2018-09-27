@@ -61,6 +61,7 @@ export class SlidesServer extends EventEmitter {
 		this._currentSource = undefined;
 		this.mimes = _options.mimes;
 		this.lastPromotionDir = _options.lastSliderDir;
+		this.portLoadingProgress = _options.portLoadingProgress;
 		this._createDir(this.lastPromotionDir, 0o644);
 		this.express.get(path.posix.join(prefix, 'slides', ':id', ':modified'), this.serveSlide.bind(this));
 		this.express.get(path.posix.join(prefix, 'slides', ':id'), this.serveSlide.bind(this));

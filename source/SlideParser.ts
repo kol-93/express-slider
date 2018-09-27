@@ -47,8 +47,9 @@ class SlideParser {
     private _socketIO: SocketIOClient.Socket | null;
 
     constructor(port: number) {
+        console.log(`[SLIDE-PARSER] Port for loading progress: ${port}.`);
         this._socketIO = null; //by default;
-        if (port > 0 && port < 65535) {
+        if (typeof port === 'number' && port > 0 && port < 65535) {
             this._socketIO = SocketIOClient.connect(`http://localhost:${port}`, { transports: ['websocket'] });
         }
     }
@@ -116,7 +117,7 @@ class SlideParser {
 
                         if (this._socketIO && step > 0 && frame.frameIndex % step === 0) {
                             const emitData: IProgressLoading = {
-                                value: frame.frameIndex * step,
+                                value: frame.frameIndex / step,
                                 source: 'Slide',
                                 unit: '%'
                             };
@@ -127,6 +128,9 @@ class SlideParser {
                             console.log(`[SLIDE-PARSER] Parsed ${frame.frameIndex} of ${framesData.length}`)
                         }
                     } finally {
+                        if (this._socketIO) {
+                            this._socketIO.emit('messages', JSON.stringify({ type: 'ProgressBar', value: { value: 100, source: 'Slide', unit: '%' } }));
+                        }
                         targetStream.removeAllListeners();
                     }
                 }
